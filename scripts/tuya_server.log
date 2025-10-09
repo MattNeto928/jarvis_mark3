@@ -1,0 +1,78 @@
+Starting TinyTuya Local Control Server...
+This controls devices locally - NO cloud API calls!
+Loaded 3 devices
+ * Serving Flask app 'tuya_local_server'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5001
+Press CTRL+C to quit
+127.0.0.1 - - [08/Oct/2025 06:24:16] "GET /health HTTP/1.1" 200 -
+Turning OFF for device
+Result: {'protocol': 4, 't': 1759919065, 'data': {'dps': {'20': False, '34': False}, 'type': 'query'}, 'dps': {'20': False, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:24:25] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Turning ON for device
+Result: {'protocol': 4, 't': 1759919067, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 06:24:27] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Turning ON for device
+Turning ON for device
+Turning ON for device
+Result: {'protocol': 4, 't': 1759919132, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:25:32] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919133, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:25:33] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919133, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:25:33] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Turning OFF for deviceTurning OFF for device
+
+Turning OFF for device
+Result: {'protocol': 4, 't': 1759919195, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:36] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919196, 'data': {'dps': {'20': False, '34': False}, 'type': 'query'}, 'dps': {'20': False, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:36] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919196, 'data': {'dps': {'20': False, '34': False}, 'type': 'query'}, 'dps': {'20': False, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:36] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Turning ON for device
+Turning ON for device
+Turning ON for device
+Result: {'protocol': 4, 't': 1759919205, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:45] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919205, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:45] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919205, 'data': {'dps': {'20': True, '34': False}, 'type': 'query'}, 'dps': {'20': True, '34': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:45] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Turning OFF for device
+Turning OFF for deviceTurning OFF for device
+
+Result: {'protocol': 4, 't': 1759919214, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:54] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919214, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:54] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919214, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:26:54] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Turning ON for device
+Turning ON for device
+Turning ON for device
+Result: {'protocol': 4, 't': 1759919222, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 06:27:02] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919222, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 06:27:02] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919222, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 06:27:02] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Turning OFF for deviceTurning OFF for device
+
+Turning OFF for device
+Result: {'protocol': 4, 't': 1759919316, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:28:36] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919316, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:28:37] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759919316, 'data': {'dps': {'20': False}}, 'dps': {'20': False}}
+127.0.0.1 - - [08/Oct/2025 06:28:37] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -
+Turning ON for device
+Turning ON for device
+Result: {'protocol': 4, 't': 1759925768, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 08:16:09] "POST /device/eb506e78c700b185a2ppjq/control HTTP/1.1" 200 -
+Result: {'protocol': 4, 't': 1759925768, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 08:16:09] "POST /device/ebf9a11b3323926dac7jmt/control HTTP/1.1" 200 -
+Turning ON for device
+Result: {'protocol': 4, 't': 1759926222, 'data': {'dps': {'20': True}}, 'dps': {'20': True}}
+127.0.0.1 - - [08/Oct/2025 08:23:43] "POST /device/eb46a372812df2161b6ws2/control HTTP/1.1" 200 -

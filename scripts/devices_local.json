@@ -1,0 +1,26 @@
+[
+  {
+    "id": "eb506e78c700b185a2ppjq",
+    "name": "Main1",
+    "type": "light",
+    "ip": "192.168.1.2",
+    "local_key": "a^<&D|RG>:Gkk=X4",
+    "version": 3.5
+  },
+  {
+    "id": "ebf9a11b3323926dac7jmt",
+    "name": "Main2",
+    "type": "light",
+    "ip": "192.168.1.3",
+    "local_key": "tle+M(;<]#_f5:`Y",
+    "version": 3.5
+  },
+  {
+    "id": "eb46a372812df2161b6ws2",
+    "name": "Door",
+    "type": "light",
+    "ip": "192.168.1.4",
+    "local_key": ":}|^BuYk!w=.lci|",
+    "version": 3.5
+  }
+]

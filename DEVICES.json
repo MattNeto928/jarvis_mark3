@@ -1,0 +1,24 @@
+[
+  {
+    "id": "eb506e78c700b185a2ppjq",
+    "name": "Main 1",
+    "type": "light",
+    "online": true,
+    "room": "Main Room"
+  },
+  {
+    "id": "ebf9a11b3323926dac7jmt",
+    "name": "Main 2",
+    "type": "light",
+    "online": true,
+    "room": "Main Room"
+  },
+  {
+    "id": "eb46a372812df2161b6ws2",
+    "name": "Door Light",
+    "type": "light",
+    "online": true,
+    "room": "Entrance"
+  }
+]
+
