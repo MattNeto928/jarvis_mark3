@@ -7,10 +7,21 @@ import Stocks from './widgets/Stocks'
 import News from './widgets/News'
 import VoiceAssistant from './widgets/VoiceAssistant'
 import IoTDevices from './widgets/IoTDevices'
+import HeartRate from './widgets/HeartRate'
+import { UartProvider, useUart } from '@/lib/uartContext'
 
-export default function SmartMirror() {
+function SmartMirrorContent() {
+  const { isDimmed } = useUart()
+
   return (
     <>
+      {/* Fade overlay - smoothly transitions opacity */}
+      <div 
+        className={`fixed inset-0 bg-black z-50 pointer-events-none transition-opacity duration-[3000ms] ${
+          isDimmed ? 'opacity-90' : 'opacity-0'
+        }`} 
+      />
+
       {/* Animated Background */}
       <div className="polygon-bg">
         <div className="gradient-orb gradient-orb-1"></div>
@@ -40,6 +51,9 @@ export default function SmartMirror() {
             
             {/* IoT Devices */}
             <IoTDevices />
+            
+            {/* Heart Rate */}
+            <HeartRate />
           </div>
 
           {/* Bottom Section - Voice Assistant (Minimal) */}
@@ -49,6 +63,14 @@ export default function SmartMirror() {
         </div>
       </main>
     </>
+  )
+}
+
+export default function SmartMirror() {
+  return (
+    <UartProvider>
+      <SmartMirrorContent />
+    </UartProvider>
   )
 }
 

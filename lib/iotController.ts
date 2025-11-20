@@ -1,28 +1,63 @@
 /**
  * IoT Device Controller
  * Handles execution of IoT commands from AI responses
+ * Routes commands to appropriate transport layer (network, UART, SPI, I2C)
  */
 
-import { IoTCommand, LightCommand } from './iotTypes'
+import { IoTCommand, LightCommand, UartPacket } from './iotTypes'
+import { sendDirectUartPacket } from './uartService'
 
 export class IoTController {
   /**
    * Execute an IoT command
+   * Handles both direct UART packets and Tuya light commands
    */
   static async executeCommand(command: IoTCommand): Promise<{ success: boolean; message: string }> {
     console.log('Executing IoT command:', command)
 
     try {
-      switch (command.type) {
-        case 'light':
-          return await this.controlLight(command as LightCommand)
+      // Check if it's a direct UART packet (has dst/src/device/payload)
+      if ('dst' in command && 'src' in command && 'device' in command && 'payload' in command) {
+        return await this.handleUartPacket(command as UartPacket)
+      }
+
+      // Otherwise, it's a structured command with transport/type/etc
+      if (!('transport' in command)) {
+        return { success: false, message: 'Invalid command format: missing transport field' }
+      }
+
+      // Route based on transport type
+      switch (command.transport) {
+        case 'network':
+          // Network transport (Tuya lights)
+          if (command.type === 'light') {
+            return await this.controlLight(command as LightCommand)
+          }
+          return { success: false, message: `Unsupported device type for network transport: ${command.type}` }
+
+        case 'uart':
+          return { success: false, message: 'UART commands should use direct packet format with dst/src/device/payload' }
+
+        case 'spi':
+        case 'i2c':
+          // Future: SPI and I2C transports
+          return { success: false, message: `Transport type ${command.transport} not yet implemented` }
+
         default:
-          return { success: false, message: `Unsupported device type: ${command.type}` }
+          return { success: false, message: `Unknown transport type: ${(command as any).transport}` }
       }
     } catch (error: any) {
       console.error('IoT command execution error:', error)
       return { success: false, message: error.message || 'Command failed' }
     }
+  }
+
+  /**
+   * Handle direct UART packet
+   */
+  private static async handleUartPacket(packet: UartPacket): Promise<{ success: boolean; message: string }> {
+    console.log('Handling direct UART packet:', packet)
+    return await sendDirectUartPacket(packet)
   }
 
   /**

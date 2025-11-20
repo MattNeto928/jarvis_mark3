@@ -3,15 +3,34 @@
 import { useState, useEffect } from 'react'
 
 export default function Clock() {
-  const [time, setTime] = useState(new Date())
+  // Initialize with null to prevent hydration mismatch
+  const [time, setTime] = useState<Date | null>(null)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
+    setTime(new Date())
+    
     const timer = setInterval(() => {
       setTime(new Date())
     }, 1000)
 
     return () => clearInterval(timer)
   }, [])
+
+  // Don't render until mounted to prevent hydration mismatch
+  if (!mounted || !time) {
+    return (
+      <div className="space-y-2">
+        <div className="text-[120px] font-thin leading-none tracking-tight text-white">
+          <span className="text-white/40">--:--</span>
+        </div>
+        <div className="text-2xl font-light text-white/60">
+          Loading...
+        </div>
+      </div>
+    )
+  }
 
   const hours = time.getHours().toString().padStart(2, '0')
   const minutes = time.getMinutes().toString().padStart(2, '0')
