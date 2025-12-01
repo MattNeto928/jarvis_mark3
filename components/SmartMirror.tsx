@@ -11,7 +11,7 @@ import HeartRate from './widgets/HeartRate'
 import { UartProvider, useUart } from '@/lib/uartContext'
 
 function SmartMirrorContent() {
-  const { isDimmed } = useUart()
+  const { isDimmed, setPresenceOn } = useUart()
 
   return (
     <>
@@ -29,20 +29,34 @@ function SmartMirrorContent() {
       </div>
 
       {/* Main Smart Mirror Layout */}
-      <main className="relative z-10 min-h-screen w-full overflow-y-auto p-8">
+      <main 
+        className="relative z-10 h-screen w-full overflow-hidden flex flex-col p-4"
+        onClick={setPresenceOn}
+      >
         {/* 9:16 Portrait Container */}
-        <div className="max-w-[1080px] mx-auto space-y-8">
+        <div className="max-w-[1080px] mx-auto w-full h-full flex flex-col">
           
-          {/* Top Section - Clock */}
-          <div className="text-center">
+          {/* Header - Voice Status and Heart Rate */}
+          <div className="flex-shrink-0 flex items-start justify-between mb-4">
+            <VoiceAssistant />
+            <HeartRate />
+          </div>
+
+          {/* Weather */}
+          <div className="flex-shrink-0">
+            <Weather />
+          </div>
+
+          {/* Clock */}
+          <div className="text-center flex-shrink-0 mt-4">
             <Clock />
           </div>
 
-          {/* Middle Section - Information Grid */}
-          <div className="grid grid-cols-1 gap-6">
-            {/* Weather */}
-            <Weather />
-            
+          {/* Mirror Space */}
+          <div className="flex-1"></div>
+
+          {/* Bottom Widgets */}
+          <div className="flex-shrink-0 space-y-3">
             {/* Stocks */}
             <Stocks />
             
@@ -51,14 +65,6 @@ function SmartMirrorContent() {
             
             {/* IoT Devices */}
             <IoTDevices />
-            
-            {/* Heart Rate */}
-            <HeartRate />
-          </div>
-
-          {/* Bottom Section - Voice Assistant (Minimal) */}
-          <div className="mt-8">
-            <VoiceAssistant />
           </div>
         </div>
       </main>

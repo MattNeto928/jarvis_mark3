@@ -8,6 +8,33 @@ import { IoTCommand, LightCommand, UartPacket } from './iotTypes'
 import { sendDirectUartPacket } from './uartService'
 
 export class IoTController {
+  private static lightState = false // Track light state for toggling
+
+  /**
+   * Toggle all Tuya lights (quick command for wake word)
+   */
+  static async toggleLights(): Promise<{ success: boolean; message: string }> {
+    // Toggle state
+    this.lightState = !this.lightState
+    
+    console.log('💡 Toggling lights to:', this.lightState ? 'ON' : 'OFF')
+    
+    // Toggle all three lights
+    const commands = [
+      { type: 'light' as const, transport: 'network' as const, deviceId: 'eb506e78c700b185a2ppjq', action: 'power' as const, value: this.lightState },
+      { type: 'light' as const, transport: 'network' as const, deviceId: 'ebf9a11b3323926dac7jmt', action: 'power' as const, value: this.lightState },
+      { type: 'light' as const, transport: 'network' as const, deviceId: 'eb46a372812df2161b6ws2', action: 'power' as const, value: this.lightState }
+    ]
+    
+    const results = await Promise.all(commands.map(cmd => this.executeCommand(cmd)))
+    const allSuccess = results.every(r => r.success)
+    
+    return {
+      success: allSuccess,
+      message: allSuccess ? `Lights ${this.lightState ? 'on' : 'off'}` : 'Some lights failed to toggle'
+    }
+  }
+
   /**
    * Execute an IoT command
    * Handles both direct UART packets and Tuya light commands

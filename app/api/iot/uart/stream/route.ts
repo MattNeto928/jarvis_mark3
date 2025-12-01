@@ -114,6 +114,7 @@ function startListenerProcess() {
 
           try {
             const data = JSON.parse(jsonStr)
+
             const packet = {
               timestamp: new Date().toISOString(),
               data: data,

@@ -41,7 +41,11 @@ export class UartStreamClient {
 
           // Log to console
           if (packet.type === 'complete_packet') {
-            console.log('📨 UART RX:', packet.data)
+            // Only log presence events and BPM summaries to reduce console spam
+            const data = packet.data as any
+            if (data.event || data.packet_type === 'bpm_summary') {
+              console.log('📨 UART RX:', packet.data)
+            }
           } else if (packet.type === 'raw_hex') {
             console.log('📨 UART RX (hex):', packet.data)
           } else if (packet.type === 'connected') {

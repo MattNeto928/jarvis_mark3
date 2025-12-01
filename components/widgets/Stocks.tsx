@@ -52,9 +52,9 @@ export default function Stocks() {
   return (
     <div className="glass rounded-2xl p-6">
       <h3 className="text-lg font-light text-white/80 mb-4">Markets</h3>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="flex gap-4 justify-between">
         {stocks.map((stock) => (
-          <div key={stock.symbol} className="space-y-1">
+          <div key={stock.symbol} className="space-y-1 text-center">
             <div className="text-sm font-light text-white/60">{stock.symbol}</div>
             <div className="text-2xl font-light text-white">
               ${stock.price.toFixed(2)}
@@ -62,8 +62,7 @@ export default function Stocks() {
             <div className={`text-sm font-light ${
               stock.change >= 0 ? 'text-emerald-400' : 'text-red-400'
             }`}>
-              {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} 
-              ({stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%)
+              {stock.change >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
             </div>
           </div>
         ))}

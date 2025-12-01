@@ -73,48 +73,71 @@ def main():
 
         print("✅ UART Listener connected - waiting for data...", file=sys.stderr, flush=True)
 
+        # Line buffer to accumulate data until we get a complete line
+        line_buffer = b''
+
         while True:
-            # Check if data is waiting in the buffer
-            if ser.in_waiting > 0:
-                # Read all available bytes
-                data = ser.read(ser.in_waiting)
+            try:
+                # Read available bytes (non-blocking due to timeout)
+                if ser.in_waiting > 0:
+                    chunk = ser.read(ser.in_waiting)
+                    line_buffer += chunk
 
-                try:
-                    # Try to decode as UTF-8 text
-                    decoded_data = data.decode('utf-8').strip()
-                    if decoded_data:
-                        # Output as JSON for the SSE endpoint to consume
-                        output = {
-                            "timestamp": datetime.now().isoformat(),
-                            "data": decoded_data,
-                            "type": "uart_chunk"
-                        }
-                        print(json.dumps(output), flush=True)
+                    # Process all complete lines in the buffer
+                    while b'\n' in line_buffer:
+                        # Extract one complete line
+                        line, line_buffer = line_buffer.split(b'\n', 1)
 
-                        # Log to stderr for debugging
-                        print(f"📨 RX: {decoded_data[:80]}{'...' if len(decoded_data) > 80 else ''}", file=sys.stderr, flush=True)
+                        if not line:
+                            continue
 
-                        # Check for presence detection packets (after outputting)
                         try:
-                            parsed = json.loads(decoded_data)
-                            if parsed.get("node_type") == "HP" and "event" in parsed:
-                                handle_presence_event(parsed["event"])
-                        except Exception as e:
-                            # Silently ignore parsing errors
-                            pass
+                            # Decode as UTF-8 text
+                            decoded_data = line.decode('utf-8').strip()
 
-                except UnicodeDecodeError:
-                    # If decoding fails, send raw hex
-                    output = {
-                        "timestamp": datetime.now().isoformat(),
-                        "data": data.hex(),
-                        "type": "uart_raw_hex"
-                    }
-                    print(json.dumps(output), flush=True)
-                    print(f"📨 RX (hex): {data.hex()}", file=sys.stderr, flush=True)
+                            if decoded_data:
+                                # Output as JSON for the SSE endpoint to consume
+                                output = {
+                                    "timestamp": datetime.now().isoformat(),
+                                    "data": decoded_data,
+                                    "type": "uart_chunk"
+                                }
+                                print(json.dumps(output), flush=True)
 
-            # Small sleep to prevent 100% CPU usage
-            time.sleep(0.01)
+                                # Log to stderr for debugging
+                                print(f"📨 RX: {decoded_data[:80]}{'...' if len(decoded_data) > 80 else ''}", file=sys.stderr, flush=True)
+
+                                # Check for presence detection packets (after outputting)
+                                try:
+                                    parsed = json.loads(decoded_data)
+                                    if parsed.get("node_type") == "HP" and "event" in parsed:
+                                        handle_presence_event(parsed["event"])
+                                except Exception:
+                                    # Silently ignore parsing errors
+                                    pass
+
+                        except UnicodeDecodeError:
+                            # If decoding fails, send raw hex
+                            output = {
+                                "timestamp": datetime.now().isoformat(),
+                                "data": line.hex(),
+                                "type": "uart_raw_hex"
+                            }
+                            print(json.dumps(output), flush=True)
+                            print(f"📨 RX (hex): {line.hex()}", file=sys.stderr, flush=True)
+
+                    # Prevent buffer overflow - clear if too large without finding newline
+                    if len(line_buffer) > 10000:
+                        print(f"⚠️ Line buffer overflow, clearing {len(line_buffer)} bytes", file=sys.stderr, flush=True)
+                        line_buffer = b''
+
+                # Small sleep to prevent 100% CPU usage
+                time.sleep(0.001)
+
+            except Exception as e:
+                # Log unexpected errors but keep running
+                print(f"⚠️ Error in main loop: {e}", file=sys.stderr, flush=True)
+                time.sleep(0.01)
 
     except serial.SerialException as e:
         print(f"❌ Error opening serial port: {e}", file=sys.stderr, flush=True)

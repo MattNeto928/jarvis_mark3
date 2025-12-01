@@ -15,12 +15,19 @@ export interface WakeWordConfig {
   keywordBuiltin?: 'alexa' | 'americano' | 'blueberry' | 'bumblebee' | 'computer' | 'grapefruit' | 'grasshopper' | 'hey google' | 'hey siri' | 'jarvis' | 'ok google' | 'picovoice' | 'porcupine' | 'terminator'
   sensitivity?: number // 0.0 to 1.0, default 0.5
   keywordLabel?: string // Display name for the wake word (e.g., 'Jarvis')
+  keywords?: Array<{ // Multiple wake words
+    keywordPath?: string
+    keywordBase64?: string
+    keywordBuiltin?: string
+    sensitivity?: number
+    keywordLabel?: string
+  }>
 }
 
 export class WakeWordService {
   private porcupine: PorcupineWorker | null = null
   private state: AssistantState = 'idle'
-  private onWakeWordDetected: (() => void) | null = null
+  private onWakeWordDetected: ((keywordIndex: number) => void) | null = null
   private onStateChange: ((state: AssistantState) => void) | null = null
   private isInitialized = false
   private isSuppressed = false // Suppresses wake word during TTS
@@ -35,7 +42,7 @@ export class WakeWordService {
    * Must be called from client-side only (browser environment)
    */
   async initialize(
-    onWakeWordDetected: () => void,
+    onWakeWordDetected: (keywordIndex: number) => void,
     onStateChange?: (state: AssistantState) => void
   ): Promise<void> {
     // Ensure we're in a browser environment
@@ -44,83 +51,77 @@ export class WakeWordService {
     }
 
     this.onWakeWordDetected = onWakeWordDetected
-    this.onStateChange = onStateChange
+    this.onStateChange = onStateChange || null
 
     try {
-      // Determine which wake word configuration to use
-      let keywordConfig: { builtin?: string; publicPath?: string; base64?: string; label?: string; sensitivity: number }
+      // Build keyword configs array
+      const keywordConfigs: any[] = []
+      
+      // Support both single keyword (legacy) and multiple keywords
+      const keywords = this.config.keywords || [{
+        keywordPath: this.config.keywordPath,
+        keywordBase64: this.config.keywordBase64,
+        keywordBuiltin: this.config.keywordBuiltin,
+        keywordLabel: this.config.keywordLabel,
+        sensitivity: this.config.sensitivity
+      }]
+      
+      console.log('🔧 Loading', keywords.length, 'wake word(s)...')
+      
+      for (let i = 0; i < keywords.length; i++) {
+        const keyword = keywords[i]
+        console.log(`📝 Keyword ${i}:`, keyword.keywordLabel || keyword.keywordPath || keyword.keywordBuiltin)
+        let keywordConfig: any
 
-      if (this.config.keywordBase64) {
-        // Use base64 encoded .ppn file
-        const label = this.config.keywordLabel || 'custom-wake-word'
-        console.log('🎯 Loading custom wake word from base64')
-        console.log('🏷️  Wake word label:', label)
-        keywordConfig = {
-          base64: this.config.keywordBase64,
-          label: label,  // Required for custom keywords
-          sensitivity: this.config.sensitivity || 0.5
-        }
-      } else if (this.config.keywordPath) {
-        // Use custom .ppn file via publicPath or base64
-        // Try base64 first as it's more reliable for platform compatibility
-        const label = this.config.keywordLabel || 'custom-wake-word'
-        console.log('🎯 Loading custom wake word from:', this.config.keywordPath)
-        console.log('🏷️  Wake word label:', label)
+        if (keyword.keywordBase64) {
+          const label = keyword.keywordLabel || 'custom-wake-word'
+          console.log('   ✓ Loading from base64:', label)
+          keywordConfig = {
+            base64: keyword.keywordBase64,
+            label: label,
+            sensitivity: keyword.sensitivity || 0.5
+          }
+        } else if (keyword.keywordPath) {
+          const label = keyword.keywordLabel || 'custom-wake-word'
+          console.log('   ✓ Loading from path:', keyword.keywordPath)
 
-        try {
-          console.log('🔍 Fetching file to convert to base64...')
-          const response = await fetch(this.config.keywordPath)
+          const response = await fetch(keyword.keywordPath)
           if (!response.ok) {
+            console.error('   ❌ Failed to fetch:', response.status, response.statusText)
             throw new Error(`Failed to fetch wake word file: ${response.status} ${response.statusText}`)
           }
           
-          const fileSize = response.headers.get('content-length')
-          const actualFileSize = fileSize ? parseInt(fileSize) : 0
-          console.log('✅ File found, file size:', actualFileSize, 'bytes')
-          
-          // Always try base64 first - it's more reliable and bypasses some platform checks
-          console.log('🔄 Loading file as base64 (more reliable for platform compatibility)...')
           const fileData = await response.arrayBuffer()
           const uint8Array = new Uint8Array(fileData)
+          const base64Data = btoa(Array.from(uint8Array).map(byte => String.fromCharCode(byte)).join(''))
           
-          // Convert to base64 safely
-          const base64Data = btoa(
-            Array.from(uint8Array)
-              .map(byte => String.fromCharCode(byte))
-              .join('')
-          )
-          console.log('✅ Converted to base64, length:', base64Data.length, 'characters')
+          console.log('   ✓ Converted to base64, size:', fileData.byteLength, 'bytes')
           
-          // Use base64 - PorcupineKeywordCustom extends PvModel, so it inherits these properties
           keywordConfig = {
             base64: base64Data,
             label: label,
-            sensitivity: this.config.sensitivity || 0.5,
-            // Optional PvModel properties that might help
-            forceWrite: true,  // Force re-write to IndexedDB (bypasses cache)
-            version: Date.now()  // Use timestamp as version to force fresh load
+            sensitivity: keyword.sensitivity || 0.5
           }
-          console.log('📋 Using base64 encoding with forceWrite=true')
-          console.log('   Base64 length:', base64Data.length, 'chars')
-          console.log('   Original file size:', actualFileSize, 'bytes')
-          console.log('   This bypasses publicPath loading and may help with platform validation')
-          
-        } catch (fetchError) {
-          console.error('❌ Failed to fetch wake word file:', fetchError)
-          throw new Error(`Wake word file not found at ${this.config.keywordPath}. Please ensure the file exists in the public directory.`)
+        } else if (keyword.keywordBuiltin) {
+          console.log('   ✓ Using built-in:', keyword.keywordBuiltin)
+          keywordConfig = {
+            builtin: keyword.keywordBuiltin,
+            sensitivity: keyword.sensitivity || 0.5
+          }
+        } else {
+          console.warn('   ⚠️ Skipping - no valid keyword source')
+          continue
         }
-      } else if (this.config.keywordBuiltin) {
-        // Use built-in keyword
-        console.log('🎯 Using built-in wake word:', this.config.keywordBuiltin)
-        keywordConfig = {
-          builtin: this.config.keywordBuiltin,
-          sensitivity: this.config.sensitivity || 0.5
-        }
-      } else {
-        throw new Error('Must provide either keywordPath, keywordBase64, or keywordBuiltin')
+        
+        keywordConfigs.push(keywordConfig)
+        console.log(`   ✅ Keyword ${i} loaded successfully`)
+      }
+      
+      if (keywordConfigs.length === 0) {
+        throw new Error('Must provide at least one keyword')
       }
 
-      console.log('📋 Keyword configuration:', JSON.stringify(keywordConfig))
+      console.log('✅ Total keywords loaded:', keywordConfigs.length)
 
       // Create Porcupine worker for wake word detection
       // Note: PorcupineWorker.create signature:
@@ -151,19 +152,28 @@ export class WakeWordService {
       try {
         this.porcupine = await PorcupineWorker.create(
           this.config.accessKey,
-          [keywordConfig],
+          keywordConfigs,
           (detection) => {
             // Wake word detected callback
             // detection contains: { index: number, label: string }
+            console.log('🔔 RAW DETECTION:', JSON.stringify(detection))
+            console.log('   - Index:', detection.index)
+            console.log('   - Label:', detection.label)
+            console.log('   - State:', this.state)
+            console.log('   - Suppressed:', this.isSuppressed)
+            
             if (!this.isSuppressed && this.state === 'idle') {
               const wakeWordName = detection.label || this.config.keywordLabel || this.config.keywordBuiltin || 'custom wake word'
-              console.log(`🎯 Wake word detected: "${wakeWordName}"`)
+              console.log(`🎯 Wake word ACCEPTED: "${wakeWordName}" (index: ${detection.index})`)
               this.setState('listening')
               if (this.onWakeWordDetected) {
-                this.onWakeWordDetected()
+                console.log('📞 Calling onWakeWordDetected with index:', detection.index)
+                this.onWakeWordDetected(detection.index)
+              } else {
+                console.warn('⚠️ onWakeWordDetected callback is null!')
               }
             } else {
-              console.log('🔇 Wake word detected but suppressed (state:', this.state, ', suppressed:', this.isSuppressed, ')')
+              console.log('🔇 Wake word REJECTED (state:', this.state, ', suppressed:', this.isSuppressed, ')')
             }
           },
           porcupineModel,
