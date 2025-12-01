@@ -1,4 +1,4 @@
 flask==3.0.0
 flask-cors==4.0.0
 tinytuya==1.13.2
-
+pyserial==3.5

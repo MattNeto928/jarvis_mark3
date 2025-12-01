@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { RealtimeClient, type ConnectionStatus, type RealtimeEvent } from '@/lib/realtimeClient'
-import { EnhancedAudioRecorder, EnhancedAudioPlayer, base64ToPCM16 } from '@/lib/audioUtilsEnhanced'
+import { EnhancedAudioRecorder, StreamingAudioPlayer, base64ToPCM16 } from '@/lib/audioUtilsEnhanced'
 import { WakeWordService, type AssistantState } from '@/lib/wakeWordService'
 import { parseMultipleIoTCommands } from '@/lib/iotTypes'
 import { IoTController } from '@/lib/iotController'
-import { TTSService } from '@/lib/ttsService'
 
 type Voice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar'
 
@@ -20,9 +19,7 @@ export default function VoiceAssistant() {
   const [lastResponse, setLastResponse] = useState('')
   const userTranscriptRef = useRef('')
   const commitTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const audioBufferRef = useRef<string[]>([])
   const isPlayingAudioRef = useRef(false)
-  const audioPlaybackPromiseRef = useRef<Promise<void> | null>(null)
   const isProcessingResponseRef = useRef(false)
   const [selectedVoice] = useState<Voice>('alloy')
   const wakeWordPath = '/wake-words/jarvis.ppn'
@@ -31,9 +28,8 @@ export default function VoiceAssistant() {
 
   const realtimeClientRef = useRef<RealtimeClient | null>(null)
   const audioRecorderRef = useRef<EnhancedAudioRecorder | null>(null)
-  const audioPlayerRef = useRef<EnhancedAudioPlayer | null>(null)
+  const audioPlayerRef = useRef<StreamingAudioPlayer | null>(null)
   const wakeWordServiceRef = useRef<WakeWordService | null>(null)
-  const ttsServiceRef = useRef<TTSService | null>(null)
   const isExecutingCommandRef = useRef(false)
   const accumulatedTranscriptRef = useRef('')
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -100,8 +96,7 @@ export default function VoiceAssistant() {
 
       await wakeWordServiceRef.current.initialize(handleWakeWordDetected, handleStateChange)
       audioRecorderRef.current = new EnhancedAudioRecorder(30000)
-      audioPlayerRef.current = new EnhancedAudioPlayer()
-      ttsServiceRef.current = new TTSService(apiKey)
+      audioPlayerRef.current = new StreamingAudioPlayer()
 
       await audioRecorderRef.current.initializeWithTimeout(
         (base64Audio) => {
@@ -116,7 +111,7 @@ export default function VoiceAssistant() {
         30000
       )
 
-      await audioPlayerRef.current.initializeWithCallbacks(handleAudioPlaybackStart, handleAudioPlaybackEnd)
+      await audioPlayerRef.current.initialize(handleAudioPlaybackStart, handleAudioPlaybackEnd)
 
       realtimeClientRef.current = new RealtimeClient(apiKey, 'gpt-4o-realtime-preview-2024-12-17', selectedVoice, devices)
 
@@ -243,16 +238,12 @@ export default function VoiceAssistant() {
           clearTimeout(commitTimeoutRef.current)
           commitTimeoutRef.current = null
         }
-        if (isPlayingAudioRef.current && audioPlayerRef.current) {
-          audioPlayerRef.current.reset()
-          isPlayingAudioRef.current = false
-          audioPlaybackPromiseRef.current = null
-        }
+        // Reset audio player for new response
         if (audioPlayerRef.current) {
           audioPlayerRef.current.reset()
-          isExecutingCommandRef.current = false
         }
-        audioBufferRef.current = []
+        isPlayingAudioRef.current = false
+        isExecutingCommandRef.current = false
         accumulatedTranscriptRef.current = ''
         if (audioRecorderRef.current) {
           audioRecorderRef.current.stop()
@@ -299,61 +290,27 @@ export default function VoiceAssistant() {
         if (event.transcript) {
           const iotCommands = parseMultipleIoTCommands(event.transcript)
           if (iotCommands.length > 0) {
-            if (!isExecutingCommandRef.current) {
-              isExecutingCommandRef.current = true
-              if (audioPlayerRef.current) {
-                audioPlayerRef.current.reset()
-              }
-            }
+            // Extract friendly message for display (remove JSON)
             const extractFriendlyMessage = (transcript: string): string => {
               const withoutJson = transcript.replace(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, '').trim()
               return withoutJson || `Executed ${iotCommands.length} command${iotCommands.length > 1 ? 's' : ''}`
             }
             const friendlyMessage = extractFriendlyMessage(event.transcript)
-            const responseText = friendlyMessage
-            setLastResponse(responseText)
+            setLastResponse(friendlyMessage)
             setCurrentTranscript('')
-            const ttsPromise = ttsServiceRef.current ? (async () => {
-              try {
-                wakeWordServiceRef.current?.suppressWakeWord(true)
-                wakeWordServiceRef.current?.setState('speaking')
-                await ttsServiceRef.current.speakText(responseText, { voice: 'alloy', speed: 1.1 })
-                wakeWordServiceRef.current?.suppressWakeWord(false)
-                if (!isProcessingResponseRef.current) {
-                  wakeWordServiceRef.current?.reset()
-                }
-              } catch (err) {
-                console.error('TTS error:', err)
-                wakeWordServiceRef.current?.suppressWakeWord(false)
-                if (!isProcessingResponseRef.current) {
-                  wakeWordServiceRef.current?.reset()
-                }
-              }
-            })() : Promise.resolve()
-            const commandPromise = Promise.all(iotCommands.map(async (cmd) => {
-              const result = await IoTController.executeCommand(cmd)
-              return result
-            })).then(async () => {
-              isExecutingCommandRef.current = false
-              await ttsPromise
-              if (!isProcessingResponseRef.current) {
-                wakeWordServiceRef.current?.reset()
-              }
-            }).catch(async err => {
-              console.error('❌ Error executing commands:', err)
-              isExecutingCommandRef.current = false
-              await ttsPromise
-              if (!isProcessingResponseRef.current) {
-                wakeWordServiceRef.current?.reset()
-              }
-            })
-            commandPromise.catch(err => {
-              console.error('Command execution error:', err)
-            })
+            
+            // Execute IoT commands in parallel - let Realtime API audio play naturally
+            Promise.all(iotCommands.map(cmd => IoTController.executeCommand(cmd)))
+              .then(results => {
+                console.log('✅ IoT commands executed:', results)
+                isExecutingCommandRef.current = false
+              })
+              .catch(err => {
+                console.error('❌ Error executing IoT commands:', err)
+                isExecutingCommandRef.current = false
+              })
           } else {
-            if (isExecutingCommandRef.current) {
-              isExecutingCommandRef.current = false
-            }
+            isExecutingCommandRef.current = false
             setLastResponse(event.transcript)
             setCurrentTranscript('')
           }
@@ -361,53 +318,32 @@ export default function VoiceAssistant() {
         break
 
       case 'response.audio.delta':
-        if (event.delta) {
-          if (!isExecutingCommandRef.current) {
-            audioBufferRef.current.push(event.delta)
+        // Stream audio immediately as chunks arrive - no buffering for lower latency
+        if (event.delta && audioPlayerRef.current) {
+          if (!isPlayingAudioRef.current) {
+            isPlayingAudioRef.current = true
+            wakeWordServiceRef.current?.suppressWakeWord(true)
+            wakeWordServiceRef.current?.setState('speaking')
           }
+          // Queue chunk for immediate playback
+          const pcm16Data = base64ToPCM16(event.delta)
+          audioPlayerRef.current.queueAudio(pcm16Data)
         }
         break
 
       case 'response.audio.done':
-        if (audioBufferRef.current.length > 0 && audioPlayerRef.current && !isExecutingCommandRef.current && !isPlayingAudioRef.current) {
-          isPlayingAudioRef.current = true
-          audioPlayerRef.current.reset()
-          wakeWordServiceRef.current?.suppressWakeWord(true)
-          wakeWordServiceRef.current?.setState('speaking')
-          const bufferToPlay = [...audioBufferRef.current]
-          audioBufferRef.current = []
-          const playBufferedAudio = async () => {
-            try {
-              for (const chunk of bufferToPlay) {
-                if (!isPlayingAudioRef.current) break
-                const pcm16Data = base64ToPCM16(chunk)
-                await audioPlayerRef.current!.playPCM16(pcm16Data)
-              }
-              isPlayingAudioRef.current = false
-              audioPlaybackPromiseRef.current = null
-              wakeWordServiceRef.current?.suppressWakeWord(false)
-              if (!isProcessingResponseRef.current) {
-                const currentState = wakeWordServiceRef.current?.getState()
-                if (currentState === 'speaking') {
-                  wakeWordServiceRef.current?.setState('idle')
-                }
-              }
-            } catch (err) {
-              console.error('Error playing buffered audio:', err)
-              isPlayingAudioRef.current = false
-              audioPlaybackPromiseRef.current = null
-              wakeWordServiceRef.current?.suppressWakeWord(false)
-              if (!isProcessingResponseRef.current) {
-                const currentState = wakeWordServiceRef.current?.getState()
-                if (currentState === 'speaking') {
-                  wakeWordServiceRef.current?.setState('idle')
-                }
+        // Audio streaming complete - wait for playback to finish
+        if (audioPlayerRef.current) {
+          audioPlayerRef.current.onPlaybackComplete(() => {
+            isPlayingAudioRef.current = false
+            wakeWordServiceRef.current?.suppressWakeWord(false)
+            if (!isProcessingResponseRef.current) {
+              const currentState = wakeWordServiceRef.current?.getState()
+              if (currentState === 'speaking') {
+                wakeWordServiceRef.current?.setState('idle')
               }
             }
-          }
-          audioPlaybackPromiseRef.current = playBufferedAudio()
-        } else {
-          audioBufferRef.current = []
+          })
         }
         break
 

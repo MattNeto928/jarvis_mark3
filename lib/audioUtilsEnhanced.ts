@@ -159,5 +159,156 @@ export class EnhancedAudioPlayer extends BaseAudioPlayer {
   }
 }
 
+/**
+ * Streaming Audio Player - plays audio chunks immediately as they arrive
+ * Optimized for low-latency streaming from Realtime API
+ */
+export class StreamingAudioPlayer {
+  private audioContext: AudioContext | null = null
+  private gainNode: GainNode | null = null
+  private nextStartTime: number = 0
+  private isPlaying = false
+  private onPlaybackStart: (() => void) | null = null
+  private onPlaybackEnd: (() => void) | null = null
+  private pendingChunks = 0
+  private completionCallback: (() => void) | null = null
+  private streamComplete = false
+
+  /**
+   * Initialize the streaming audio player
+   */
+  async initialize(
+    onPlaybackStart?: () => void,
+    onPlaybackEnd?: () => void
+  ): Promise<void> {
+    this.audioContext = new AudioContext({ sampleRate: 24000 })
+    this.gainNode = this.audioContext.createGain()
+    this.gainNode.connect(this.audioContext.destination)
+    this.nextStartTime = this.audioContext.currentTime
+    this.onPlaybackStart = onPlaybackStart || null
+    this.onPlaybackEnd = onPlaybackEnd || null
+  }
+
+  /**
+   * Queue audio chunk for immediate playback
+   * Chunks are played back-to-back with no gap for seamless audio
+   */
+  queueAudio(pcm16Data: Int16Array): void {
+    if (!this.audioContext || !this.gainNode) {
+      console.error('StreamingAudioPlayer not initialized')
+      return
+    }
+
+    // Notify playback start on first chunk
+    if (!this.isPlaying) {
+      this.isPlaying = true
+      this.streamComplete = false
+      if (this.onPlaybackStart) {
+        this.onPlaybackStart()
+      }
+    }
+
+    this.pendingChunks++
+
+    // Create audio buffer
+    const audioBuffer = this.audioContext.createBuffer(
+      1, // mono
+      pcm16Data.length,
+      24000 // 24kHz sample rate
+    )
+
+    // Convert Int16 PCM to Float32 for Web Audio API
+    const channelData = audioBuffer.getChannelData(0)
+    for (let i = 0; i < pcm16Data.length; i++) {
+      channelData[i] = pcm16Data[i] / (pcm16Data[i] < 0 ? 32768 : 32767)
+    }
+
+    // Create buffer source and schedule for seamless playback
+    const source = this.audioContext.createBufferSource()
+    source.buffer = audioBuffer
+    source.connect(this.gainNode)
+
+    // Schedule playback - use current time if we've fallen behind
+    const currentTime = this.audioContext.currentTime
+    const startTime = Math.max(currentTime, this.nextStartTime)
+    
+    source.start(startTime)
+    this.nextStartTime = startTime + audioBuffer.duration
+
+    // Track when this chunk finishes
+    source.onended = () => {
+      this.pendingChunks--
+      this.checkPlaybackComplete()
+    }
+  }
+
+  /**
+   * Register callback for when all queued audio has finished playing
+   */
+  onPlaybackComplete(callback: () => void): void {
+    this.streamComplete = true
+    this.completionCallback = callback
+    this.checkPlaybackComplete()
+  }
+
+  /**
+   * Check if all audio has finished playing
+   */
+  private checkPlaybackComplete(): void {
+    if (this.streamComplete && this.pendingChunks === 0 && this.isPlaying) {
+      this.isPlaying = false
+      if (this.onPlaybackEnd) {
+        this.onPlaybackEnd()
+      }
+      if (this.completionCallback) {
+        this.completionCallback()
+        this.completionCallback = null
+      }
+    }
+  }
+
+  /**
+   * Reset the player for a new response
+   */
+  reset(): void {
+    if (this.audioContext) {
+      this.nextStartTime = this.audioContext.currentTime
+    }
+    this.pendingChunks = 0
+    this.isPlaying = false
+    this.streamComplete = false
+    this.completionCallback = null
+  }
+
+  /**
+   * Set playback volume
+   */
+  setVolume(volume: number): void {
+    if (this.gainNode) {
+      this.gainNode.gain.value = volume
+    }
+  }
+
+  /**
+   * Check if audio is currently playing
+   */
+  getIsPlaying(): boolean {
+    return this.isPlaying
+  }
+
+  /**
+   * Cleanup resources
+   */
+  cleanup(): void {
+    if (this.audioContext) {
+      this.audioContext.close()
+      this.audioContext = null
+    }
+    this.gainNode = null
+    this.pendingChunks = 0
+    this.isPlaying = false
+  }
+}
+
 // Re-export base utilities
 export { base64ToPCM16, base64ToArrayBuffer } from './audioUtils'

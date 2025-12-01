@@ -7,9 +7,11 @@ export class AudioRecorder {
   private audioContext: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
-  private processor: ScriptProcessorNode | null = null;
+  private workletNode: AudioWorkletNode | null = null;
+  private processor: ScriptProcessorNode | null = null; // Fallback
   private onDataAvailable: ((data: string) => void) | null = null;
   private isRecording = false;
+  private useWorklet = false;
 
   async initialize(onData: (data: string) => void) {
     this.onDataAvailable = onData;
@@ -33,34 +35,67 @@ export class AudioRecorder {
     // Create source from microphone stream
     this.source = this.audioContext.createMediaStreamSource(this.stream);
     
-    // Create script processor for raw audio data
-    // Note: ScriptProcessorNode is deprecated but widely supported
-    // TODO: Migrate to AudioWorkletNode for better performance in the future
-    // Buffer size of 4096 provides good balance between latency and processing
-    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-    
-    this.processor.onaudioprocess = (e) => {
-      if (!this.isRecording || !this.onDataAvailable) return;
+    // Try to use AudioWorkletNode for better performance (runs on separate thread)
+    // Falls back to ScriptProcessorNode if AudioWorklet is not available
+    try {
+      await this.audioContext.audioWorklet.addModule('/audio-processor.worklet.js');
+      this.workletNode = new AudioWorkletNode(this.audioContext, 'pcm-processor');
+      this.useWorklet = true;
       
-      // Get the raw audio data (Float32Array from -1 to 1)
-      const inputData = e.inputBuffer.getChannelData(0);
+      // Handle messages from worklet
+      this.workletNode.port.onmessage = (event) => {
+        if (event.data.type === 'audio' && this.isRecording && this.onDataAvailable) {
+          const inputData = event.data.samples;
+          
+          // Resample to 24kHz if needed
+          const resampledData = this.resampleTo24kHz(inputData, this.audioContext!.sampleRate);
+          
+          // Convert Float32 to Int16 (PCM16)
+          const pcm16 = this.floatTo16BitPCM(resampledData);
+          
+          // Convert to base64
+          const base64 = this.arrayBufferToBase64(pcm16.buffer);
+          
+          // Send to callback
+          this.onDataAvailable(base64);
+        }
+      };
       
-      // Resample to 24kHz if needed (OpenAI Realtime API requirement)
-      const resampledData = this.resampleTo24kHz(inputData, this.audioContext!.sampleRate);
+      // Connect the audio graph
+      this.source.connect(this.workletNode);
+      this.workletNode.connect(this.audioContext.destination);
       
-      // Convert Float32 to Int16 (PCM16)
-      const pcm16 = this.floatTo16BitPCM(resampledData);
+      console.log('✅ Using AudioWorkletNode for low-latency audio capture');
+    } catch (err) {
+      console.warn('⚠️ AudioWorklet not available, falling back to ScriptProcessorNode:', err);
+      this.useWorklet = false;
       
-      // Convert to base64
-      const base64 = this.arrayBufferToBase64(pcm16.buffer);
+      // Fallback to ScriptProcessorNode (deprecated but widely supported)
+      this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
       
-      // Send to callback
-      this.onDataAvailable(base64);
-    };
-    
-    // Connect the audio graph
-    this.source.connect(this.processor);
-    this.processor.connect(this.audioContext.destination);
+      this.processor.onaudioprocess = (e) => {
+        if (!this.isRecording || !this.onDataAvailable) return;
+        
+        // Get the raw audio data (Float32Array from -1 to 1)
+        const inputData = e.inputBuffer.getChannelData(0);
+        
+        // Resample to 24kHz if needed (OpenAI Realtime API requirement)
+        const resampledData = this.resampleTo24kHz(inputData, this.audioContext!.sampleRate);
+        
+        // Convert Float32 to Int16 (PCM16)
+        const pcm16 = this.floatTo16BitPCM(resampledData);
+        
+        // Convert to base64
+        const base64 = this.arrayBufferToBase64(pcm16.buffer);
+        
+        // Send to callback
+        this.onDataAvailable(base64);
+      };
+      
+      // Connect the audio graph
+      this.source.connect(this.processor);
+      this.processor.connect(this.audioContext.destination);
+    }
   }
 
   /**
@@ -124,15 +159,28 @@ export class AudioRecorder {
 
   start() {
     this.isRecording = true;
+    // Notify worklet to start recording
+    if (this.useWorklet && this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'start' });
+    }
   }
 
   stop() {
     this.isRecording = false;
+    // Notify worklet to stop recording
+    if (this.useWorklet && this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'stop' });
+    }
   }
 
   cleanup() {
     this.isRecording = false;
     
+    if (this.workletNode) {
+      this.workletNode.port.postMessage({ type: 'stop' });
+      this.workletNode.disconnect();
+      this.workletNode = null;
+    }
     if (this.processor) {
       this.processor.disconnect();
       this.processor = null;
@@ -149,6 +197,7 @@ export class AudioRecorder {
       this.audioContext.close();
       this.audioContext = null;
     }
+    this.useWorklet = false;
   }
 }
 

@@ -212,7 +212,7 @@ For non-IoT queries, respond normally without JSON.`,
             type: 'server_vad',
             threshold: 0.5,
             prefix_padding_ms: 300,
-            silence_duration_ms: 500  // Reduced for more responsive detection
+            silence_duration_ms: 800  // Balanced: responsive but won't cut off mid-thought
           },
           temperature: 0.8,
           max_response_output_tokens: 4096
