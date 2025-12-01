@@ -9,6 +9,7 @@ import VoiceAssistant from './widgets/VoiceAssistant'
 import IoTDevices from './widgets/IoTDevices'
 import HeartRate from './widgets/HeartRate'
 import { UartProvider, useUart } from '@/lib/uartContext'
+import { SmartMirrorProvider } from '@/lib/smartMirrorContext'
 
 function SmartMirrorContent() {
   const { isDimmed, setPresenceOn } = useUart()
@@ -75,7 +76,9 @@ function SmartMirrorContent() {
 export default function SmartMirror() {
   return (
     <UartProvider>
-      <SmartMirrorContent />
+      <SmartMirrorProvider>
+        <SmartMirrorContent />
+      </SmartMirrorProvider>
     </UartProvider>
   )
 }

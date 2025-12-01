@@ -199,7 +199,7 @@ function broadcastToClients(packet: unknown) {
  * SSE endpoint - streams UART data to clients
  */
 export async function GET(request: NextRequest) {
-  console.log('📡 SSE client connecting to UART stream...')
+  // console.log('📡 SSE client connecting to UART stream...')
 
   // Start listener if not already running
   if (!listenerProcess) {

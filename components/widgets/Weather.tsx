@@ -1,18 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-
-type WeatherData = {
-  temp: number
-  feels_like: number
-  description: string
-  humidity: number
-  wind_speed: number
-  icon: string
-  city: string
-}
+import { useSmartMirror, WeatherData } from '@/lib/smartMirrorContext'
 
 export default function Weather() {
+  const { setWeather: setContextWeather } = useSmartMirror()
   const [weather, setWeather] = useState<WeatherData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -52,7 +44,7 @@ export default function Weather() {
             95: 'Thunderstorm',
           }
           
-          setWeather({
+          const newWeather = {
             temp: Math.round(data.current.temperature_2m),
             feels_like: Math.round(data.current.temperature_2m - 2),
             description: weatherCodes[data.current.weather_code] || 'Clear',
@@ -60,7 +52,9 @@ export default function Weather() {
             wind_speed: Math.round(data.current.wind_speed_10m),
             icon: data.current.weather_code <= 1 ? '☀️' : data.current.weather_code <= 3 ? '⛅' : '☁️',
             city: geoData.city || geoData.locality || 'Unknown'
-          })
+          }
+          setWeather(newWeather)
+          setContextWeather(newWeather)
           setLoading(false)
         }, (error) => {
           console.error('Geolocation error:', error)

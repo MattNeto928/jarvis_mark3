@@ -9,11 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@openai/agents": "^0.3.3",
     "@picovoice/porcupine-web": "^3.0.3",
     "@picovoice/web-voice-processor": "^4.0.9",
+    "@tavily/core": "^0.5.13",
     "next": "^15.1.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "zod": "^4.1.13",
+    "zod-to-json-schema": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

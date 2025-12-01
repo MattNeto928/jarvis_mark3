@@ -1,15 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-
-type NewsArticle = {
-  title: string
-  source: string
-  publishedAt: string
-  url: string
-}
+import { useSmartMirror, NewsArticle } from '@/lib/smartMirrorContext'
 
 export default function News() {
+  const { setNews: setContextNews } = useSmartMirror()
   const [news, setNews] = useState<NewsArticle[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -33,6 +28,7 @@ export default function News() {
             url: item.link
           }))
           setNews(articles)
+          setContextNews(articles)
         }
         setLoading(false)
       } catch (error) {

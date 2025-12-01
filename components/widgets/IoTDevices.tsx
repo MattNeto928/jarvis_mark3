@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { Device } from '@/lib/iotTypes'
+import { useSmartMirror } from '@/lib/smartMirrorContext'
 
 export default function IoTDevices() {
+  const { setDevices: setContextDevices } = useSmartMirror()
   const [devices, setDevices] = useState<Device[]>([])
 
   useEffect(() => {
@@ -12,6 +14,7 @@ export default function IoTDevices() {
         const response = await fetch('/DEVICES.json')
         const presetDevices = await response.json()
         setDevices(presetDevices)
+        setContextDevices(presetDevices)
         localStorage.setItem('iot_devices', JSON.stringify(presetDevices))
       } catch (error) {
         console.error('Error loading devices:', error)

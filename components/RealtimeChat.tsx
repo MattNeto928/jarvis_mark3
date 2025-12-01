@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { RealtimeClient, type ConnectionStatus, type RealtimeEvent } from '@/lib/realtimeClient'
-import { AudioRecorder, AudioPlayer, base64ToPCM16 } from '@/lib/audioUtils'
+import { OpenAIRealtimeWebSocket, RealtimeSession, RealtimeItem } from '@openai/agents/realtime'
+import { createJarvisAgent, SESSION_CONFIG, getEphemeralToken } from '@/lib/jarvisAgent'
 
 type Message = {
   id: string
@@ -11,7 +11,7 @@ type Message = {
   timestamp: Date
 }
 
-type Voice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar'
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 const VOICES = {
   alloy: 'Alloy - Neutral & Balanced',
@@ -21,10 +21,9 @@ const VOICES = {
   echo: 'Echo - Calm & Clear',
   sage: 'Sage - Wise & Thoughtful',
   shimmer: 'Shimmer - Soft & Gentle',
-  verse: 'Verse - Poetic & Expressive',
-  marin: 'Marin - Bright & Lively',
-  cedar: 'Cedar - Deep & Resonant',
 }
+
+type Voice = keyof typeof VOICES
 
 export default function RealtimeChat() {
   const [isConnected, setIsConnected] = useState(false)
@@ -37,9 +36,7 @@ export default function RealtimeChat() {
   const [error, setError] = useState<string | null>(null)
   const [selectedVoice, setSelectedVoice] = useState<Voice>('alloy')
 
-  const realtimeClientRef = useRef<RealtimeClient | null>(null)
-  const audioRecorderRef = useRef<AudioRecorder | null>(null)
-  const audioPlayerRef = useRef<AudioPlayer | null>(null)
+  const sessionRef = useRef<RealtimeSession | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -62,32 +59,127 @@ export default function RealtimeChat() {
 
     try {
       setError(null)
+      setConnectionStatus('connecting')
       localStorage.setItem('openai_api_key', apiKey)
-      
-      audioRecorderRef.current = new AudioRecorder()
-      audioPlayerRef.current = new AudioPlayer()
-      
-      await audioRecorderRef.current.initialize((base64Audio) => {
-        if (realtimeClientRef.current?.isConnected()) {
-          realtimeClientRef.current.sendAudio(base64Audio)
-        }
-      })
-      
-      await audioPlayerRef.current.initialize()
 
-      realtimeClientRef.current = new RealtimeClient(apiKey, 'gpt-4o-realtime-preview-2024-12-17', selectedVoice)
+      // Create Jarvis agent and session (WebSocket transport for compatibility)
+      const agent = createJarvisAgent()
+      const transport = new OpenAIRealtimeWebSocket({
+        useInsecureApiKey: true,
+      })
+
+      sessionRef.current = new RealtimeSession(agent, {
+        model: SESSION_CONFIG.model,
+        transport,
+        config: {
+          ...SESSION_CONFIG.config,
+          voice: selectedVoice,
+        },
+      })
+
+      // Set up event handlers
+      setupSessionEventHandlers()
+
+      // Get ephemeral token and connect to OpenAI
+      console.log('🔌 Getting ephemeral token...')
+      const ephemeralToken = await getEphemeralToken(apiKey, selectedVoice)
+      console.log('✅ Got ephemeral token')
+      console.log('   Token prefix:', ephemeralToken?.substring(0, 30) + '...')
+      console.log('   Starts with ek_:', ephemeralToken?.startsWith('ek_'))
       
-      realtimeClientRef.current.connect(
-        handleRealtimeEvent,
-        (status) => {
-          setConnectionStatus(status)
-          setIsConnected(status === 'connected')
-        }
-      )
+      if (!ephemeralToken || !ephemeralToken.startsWith('ek_')) {
+        throw new Error(`Invalid ephemeral token format. Expected ek_... but got: ${ephemeralToken?.substring(0, 10)}...`)
+      }
+      
+      console.log('🔌 Connecting with ephemeral token...')
+      await sessionRef.current.connect({ 
+        apiKey: ephemeralToken,
+        model: SESSION_CONFIG.model,
+      })
+
+      setIsConnected(true)
+      setConnectionStatus('connected')
+      console.log('✅ Connected to OpenAI Realtime API')
+
     } catch (err) {
       setError(`Failed to connect: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      setConnectionStatus('error')
       console.error('Connection error:', err)
     }
+  }
+
+  const setupSessionEventHandlers = () => {
+    if (!sessionRef.current) return
+
+    const session = sessionRef.current
+
+    // Handle when agent starts responding
+    session.on('agent_start', () => {
+      console.log('🎙️ Response started')
+      setCurrentTranscript('')
+    })
+
+    // Handle when agent finishes responding
+    session.on('agent_end', (_context, _agent, output) => {
+      console.log('✅ Response completed:', output)
+      if (output) {
+        addMessage('assistant', output)
+      }
+      setCurrentTranscript('')
+    })
+
+    // Handle history updates (includes user messages and transcripts)
+    session.on('history_updated', (history: RealtimeItem[]) => {
+      // Sync messages from history
+      const newMessages: Message[] = []
+      for (const item of history) {
+        if (item.type === 'message') {
+          const role = item.role as 'user' | 'assistant'
+          const content = 'transcript' in item ? (item.transcript as string) : ''
+          if (content) {
+            newMessages.push({
+              id: item.id || Date.now().toString(),
+              role,
+              content,
+              timestamp: new Date(),
+            })
+          }
+        }
+      }
+      if (newMessages.length > 0) {
+        setMessages(newMessages)
+      }
+      
+      // Update current transcript from last item if it's in progress
+      const lastItem = history[history.length - 1]
+      if (lastItem && lastItem.type === 'message' && lastItem.role === 'assistant') {
+        const transcript = 'transcript' in lastItem ? (lastItem.transcript as string) : ''
+        if (transcript && !newMessages.find(m => m.content === transcript)) {
+          setCurrentTranscript(transcript)
+        }
+      }
+    })
+
+    // Handle audio interruption
+    session.on('audio_interrupted', () => {
+      console.log('🛑 Audio interrupted')
+      setIsRecording(false)
+    })
+
+    // Handle errors
+    session.on('error', (error) => {
+      console.error('❌ Session error:', error.error)
+      const errorMessage = error.error instanceof Error 
+        ? error.error.message 
+        : String(error.error)
+      setError(`API Error: ${errorMessage}`)
+    })
+
+    // Auto-approve tool calls
+    session.on('tool_approval_requested', (_context, _agent, request) => {
+      console.log('🔧 Auto-approving tool:', request)
+      session.approve(request.approvalItem)
+    })
   }
 
   const handleDisconnect = () => {
@@ -95,102 +187,36 @@ export default function RealtimeChat() {
       stopRecording()
     }
     
-    realtimeClientRef.current?.disconnect()
-    audioRecorderRef.current?.cleanup()
-    audioPlayerRef.current?.cleanup()
-    
-    realtimeClientRef.current = null
-    audioRecorderRef.current = null
-    audioPlayerRef.current = null
+    if (sessionRef.current) {
+      sessionRef.current.close()
+      sessionRef.current = null
+    }
     
     setIsConnected(false)
     setConnectionStatus('disconnected')
   }
 
   const startRecording = () => {
-    if (audioRecorderRef.current && realtimeClientRef.current?.isConnected()) {
-      audioRecorderRef.current.start()
+    if (sessionRef.current && isConnected) {
+      // SDK handles audio capture automatically
       setIsRecording(true)
+      console.log('🎤 Recording started')
     }
   }
 
   const stopRecording = () => {
-    if (audioRecorderRef.current) {
-      audioRecorderRef.current.stop()
+    if (sessionRef.current && isRecording) {
       setIsRecording(false)
-      
-      if (realtimeClientRef.current) {
-        realtimeClientRef.current.commitAudio()
-        realtimeClientRef.current.createResponse()
-      }
+      console.log('🎤 Recording stopped')
     }
   }
 
-  const handleRealtimeEvent = async (event: RealtimeEvent) => {
-    console.log('Realtime event:', event.type)
-
-    switch (event.type) {
-      case 'session.created':
-      case 'session.updated':
-        console.log('Session ready')
-        break
-
-      case 'input_audio_buffer.speech_started':
-        setCurrentTranscript('Listening...')
-        break
-
-      case 'response.output_item.added':
-        if (audioPlayerRef.current) {
-          audioPlayerRef.current.reset()
-        }
-        break
-
-      case 'input_audio_buffer.speech_stopped':
-        setCurrentTranscript('Processing...')
-        break
-
-      case 'conversation.item.input_audio_transcription.completed':
-        if (event.transcript) {
-          setCurrentTranscript('')
-          addMessage('user', event.transcript)
-        }
-        break
-
-      case 'response.audio_transcript.delta':
-        setCurrentTranscript(prev => prev + (event.delta || ''))
-        break
-
-      case 'response.audio_transcript.done':
-        if (event.transcript) {
-          setCurrentTranscript('')
-          addMessage('assistant', event.transcript)
-        }
-        break
-
-      case 'response.audio.delta':
-        if (event.delta && audioPlayerRef.current) {
-          try {
-            const pcm16Data = base64ToPCM16(event.delta)
-            audioPlayerRef.current.playPCM16(pcm16Data)
-          } catch (err) {
-            console.error('Error playing audio:', err)
-          }
-        }
-        break
-
-      case 'response.audio.done':
-        console.log('Audio response complete')
-        break
-
-      case 'response.done':
-        console.log('Response complete')
-        setCurrentTranscript('')
-        break
-
-      case 'error':
-        setError(`API Error: ${event.error?.message || 'Unknown error'}`)
-        console.error('API error:', event.error)
-        break
+  const sendTextMessage = (text: string) => {
+    if (sessionRef.current && isConnected && text.trim()) {
+      // Add user message to UI immediately
+      addMessage('user', text)
+      // Send to agent
+      sessionRef.current.sendMessage(text)
     }
   }
 
@@ -271,7 +297,7 @@ export default function RealtimeChat() {
             </div>
             <div>
               <h3 className="text-lg font-semibold text-white">{getStatusText()}</h3>
-              <p className="text-sm text-gray-400">GPT-4o Realtime</p>
+              <p className="text-sm text-gray-400">Jarvis (OpenAI Agents SDK)</p>
             </div>
           </div>
 
@@ -374,7 +400,7 @@ export default function RealtimeChat() {
               <p className="text-gray-400">
                 {isConnected 
                   ? 'Click "Start Recording" to begin your conversation' 
-                  : 'Connect to the API to start talking with AI'}
+                  : 'Connect to the API to start talking with Jarvis'}
               </p>
             </div>
           </div>
@@ -395,7 +421,7 @@ export default function RealtimeChat() {
               <div className="flex items-center gap-2 mb-1">
                 <div className={`w-2 h-2 rounded-full ${message.role === 'user' ? 'bg-blue-300' : 'bg-emerald-400'}`}></div>
                 <p className="text-xs font-semibold opacity-70">
-                  {message.role === 'user' ? 'You' : 'AI Assistant'}
+                  {message.role === 'user' ? 'You' : 'Jarvis'}
                 </p>
               </div>
               <p className="text-sm leading-relaxed">{message.content}</p>
@@ -423,6 +449,32 @@ export default function RealtimeChat() {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Text Input */}
+      {isConnected && (
+        <div className="glass rounded-xl p-4">
+          <form onSubmit={(e) => {
+            e.preventDefault()
+            const input = e.currentTarget.querySelector('input') as HTMLInputElement
+            if (input.value.trim()) {
+              sendTextMessage(input.value)
+              input.value = ''
+            }
+          }} className="flex gap-3">
+            <input
+              type="text"
+              placeholder="Type a message or use voice..."
+              className="flex-1 px-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 focus:ring-2 focus:ring-blue-500/20 transition-all"
+            />
+            <button
+              type="submit"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-all"
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+
       {/* Instructions */}
       <div className="glass rounded-xl p-4">
         <div className="flex items-start gap-3">
@@ -431,7 +483,7 @@ export default function RealtimeChat() {
           </svg>
           <div>
             <p className="text-sm font-medium text-gray-300">
-              Connect to begin, then press Start Recording to speak naturally. The AI will detect when you finish and respond with voice.
+              Connect to begin, then use voice or text to talk with Jarvis. Try: "Turn on the lights" or "Set the LED strip to rainbow mode"
             </p>
           </div>
         </div>

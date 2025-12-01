@@ -1,15 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-
-type StockData = {
-  symbol: string
-  price: number
-  change: number
-  changePercent: number
-}
+import { useSmartMirror, StockData } from '@/lib/smartMirrorContext'
 
 export default function Stocks() {
+  const { setStocks: setContextStocks } = useSmartMirror()
   const [stocks, setStocks] = useState<StockData[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -22,6 +17,7 @@ export default function Stocks() {
         
         if (data.stocks) {
           setStocks(data.stocks)
+          setContextStocks(data.stocks)
         }
         setLoading(false)
       } catch (error) {

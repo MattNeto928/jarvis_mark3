@@ -16,7 +16,7 @@ export class UartStreamClient {
   private eventSource: EventSource | null = null
   private onPacket: UartStreamCallback | null = null
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
+  private maxReconnectAttempts = 2
   private reconnectDelay = 2000
 
   /**
@@ -25,14 +25,13 @@ export class UartStreamClient {
   connect(onPacket: UartStreamCallback) {
     this.onPacket = onPacket
 
-    console.log('📡 Connecting to UART stream...')
+    // console.log('📡 Connecting to UART stream...')
 
     try {
       this.eventSource = new EventSource('/api/iot/uart/stream')
 
       this.eventSource.onopen = () => {
-        console.log('✅ UART stream connected')
-        this.reconnectAttempts = 0
+        // console.log('✅ UART stream connected')
       }
 
       this.eventSource.onmessage = (event) => {
@@ -49,9 +48,12 @@ export class UartStreamClient {
           } else if (packet.type === 'raw_hex') {
             console.log('📨 UART RX (hex):', packet.data)
           } else if (packet.type === 'connected') {
-            console.log('🔗', packet.message)
+            // console.log('🔗', packet.message)
           } else if (packet.type === 'error') {
             console.error('❌ UART stream error:', packet.message)
+            // Stop listening to avoid infinite error spam. User can reconnect manually.
+            this.disconnect()
+            return
           }
 
           // Call user callback
@@ -73,7 +75,7 @@ export class UartStreamClient {
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++
           const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-          console.log(`🔄 Reconnecting to UART stream in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+      // console.log(`🔄 Reconnecting to UART stream in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
 
           setTimeout(() => {
             if (this.onPacket) {
@@ -93,7 +95,7 @@ export class UartStreamClient {
    * Disconnect from UART stream
    */
   disconnect() {
-    console.log('📴 Disconnecting from UART stream')
+    // console.log('📴 Disconnecting from UART stream')
 
     if (this.eventSource) {
       this.eventSource.close()

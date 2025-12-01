@@ -143,9 +143,12 @@ export class IoTController {
 
     // Try local control first, fall back to cloud
     let result: any
-    let endpoint = '/api/iot/local'  // Try local first
+    let endpoint = '/api/iot/tuya'  // Default to cloud for now (local has issues)
     
     try {
+      /*
+      // Local control disabled for now due to reliability issues
+      endpoint = '/api/iot/local'
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -155,18 +158,8 @@ export class IoTController {
       result = await response.json()
       
       // If local server not available, fall back to cloud
-      if (result.error === 'LOCAL_SERVER_OFFLINE') {
-        console.log('Local server offline, falling back to cloud API')
-        endpoint = '/api/iot/tuya'  // Fall back to cloud
-        const cloudResponse = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId, commands })
-        })
-        result = await cloudResponse.json()
-      } else if (!response.ok) {
-        // Local server returned error, try cloud
-        console.log('Local control error, falling back to cloud API')
+      if (result.error === 'LOCAL_SERVER_OFFLINE' || !response.ok) {
+        // console.log('Local control issue, falling back to cloud API')
         endpoint = '/api/iot/tuya'
         const cloudResponse = await fetch(endpoint, {
           method: 'POST',
@@ -177,8 +170,9 @@ export class IoTController {
       } else {
         console.log('Using local control (fast & free!)')
       }
-    } catch (error) {
-      console.log('Local control unavailable, using cloud API')
+      */
+      
+      // Cloud-only path
       endpoint = '/api/iot/tuya'
       const cloudResponse = await fetch(endpoint, {
         method: 'POST',
@@ -186,6 +180,25 @@ export class IoTController {
         body: JSON.stringify({ deviceId, commands })
       })
       result = await cloudResponse.json()
+
+    } catch (error) {
+      console.error('IoT control failed:', error)
+      // Last ditch attempt with cloud if not already tried
+      if (endpoint !== '/api/iot/tuya') {
+        try {
+          endpoint = '/api/iot/tuya'
+          const cloudResponse = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId, commands })
+          })
+          result = await cloudResponse.json()
+        } catch (e) {
+          return { success: false, message: 'Failed to control device (both local and cloud)' }
+        }
+      } else {
+        return { success: false, message: 'Failed to control device' }
+      }
     }
 
     console.log(`Tuya API response (via ${endpoint}):`, result)
