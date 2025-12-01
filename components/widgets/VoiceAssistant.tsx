@@ -28,12 +28,13 @@ export default function VoiceAssistant() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isProcessingRef = useRef(false)
   const isExecutingCommandRef = useRef(false)
-  const isAwaitingToolResponseRef = useRef(false) // Track if we're waiting for LLM to speak tool results
   const isSearchingRef = useRef(false) // Track if we're doing a web search
   const pendingSearchQueryRef = useRef<string | null>(null) // Store the search query
+  const llmSaidSearchingRef = useRef(false) // Track if LLM said "Searching"
+  const searchCompletedRef = useRef(false) // Track if search was already done this turn
+  const listeningTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track listening timeout
   const userTranscriptRef = useRef('')
   const accumulatedTranscriptRef = useRef('')
-  const toolCallBufferRef = useRef<Record<string, { name?: string; arguments: string; itemId?: string }>>({})
 
   // Load keys on mount
   useEffect(() => {
@@ -168,6 +169,28 @@ export default function VoiceAssistant() {
     setConnectionStatus('disconnected')
   }
 
+  // Reset all state to idle - used after response completes or on timeout
+  const resetState = () => {
+    console.log('🔄 Resetting all state to idle')
+    isProcessingRef.current = false
+    isSearchingRef.current = false
+    isExecutingCommandRef.current = false
+    llmSaidSearchingRef.current = false
+    searchCompletedRef.current = false
+    pendingSearchQueryRef.current = null
+    accumulatedTranscriptRef.current = ''
+    userTranscriptRef.current = ''
+    // Clear any pending listening timeout
+    if (listeningTimeoutRef.current) {
+      clearTimeout(listeningTimeoutRef.current)
+      listeningTimeoutRef.current = null
+    }
+    rtcClientRef.current?.setMicrophoneEnabled(false)
+    wakeWordServiceRef.current?.reset()
+    wakeWordServiceRef.current?.start().catch(err => console.error('Wake word restart error', err))
+    setCurrentTranscript('')
+  }
+
   const handleRealtimeEvent = (event: any) => {
     switch (event.type) {
       case 'session.created':
@@ -186,6 +209,11 @@ export default function VoiceAssistant() {
         setAssistantState('listening')
         rtcClientRef.current?.resumeAudio() // Ensure audio plays for new turn
         userTranscriptRef.current = ''
+        // Cancel listening timeout - speech detected!
+        if (listeningTimeoutRef.current) {
+          clearTimeout(listeningTimeoutRef.current)
+          listeningTimeoutRef.current = null
+        }
         setCurrentTranscript('Listening...')
         break
 
@@ -200,20 +228,21 @@ export default function VoiceAssistant() {
         if (event.transcript) {
           userTranscriptRef.current = event.transcript
           setCurrentTranscript(event.transcript)
+          console.log('📝 User transcript stored:', event.transcript)
           
-          // Check for search intent in user's speech
-          const searchQuery = detectSearchIntent(event.transcript)
-          if (searchQuery && !isSearchingRef.current && !pendingSearchQueryRef.current) {
-            console.log('🔎 Search intent detected:', searchQuery)
+          // If LLM already said "Searching", execute the search now
+          if (llmSaidSearchingRef.current && !pendingSearchQueryRef.current && !isSearchingRef.current) {
+            console.log('🔍 LLM already said searching, executing now...')
+            const searchQuery = extractSearchQuery(event.transcript)
+            console.log('🔍 Will search for:', searchQuery)
             pendingSearchQueryRef.current = searchQuery
-            // Execute search immediately - don't wait for response.done
-            // This ensures the search runs even if response.done fires first
+            llmSaidSearchingRef.current = false
             setTimeout(() => {
               if (pendingSearchQueryRef.current && !isSearchingRef.current) {
-                console.log('🔍 Executing search from transcription handler...')
+                console.log('🔍 Executing search...')
                 void executeWebSearch(pendingSearchQueryRef.current)
               }
-            }, 1500) // Wait 1.5s for the "Searching" audio to play
+            }, 500)
           }
         }
         break
@@ -225,16 +254,14 @@ export default function VoiceAssistant() {
 
       case 'response.output_item.added':
         isProcessingRef.current = true
-        wakeWordServiceRef.current?.suppressWakeWord(true)
+        // Don't suppress wake word - allow interruption
         wakeWordServiceRef.current?.setState('processing')
-        handleFunctionCallItem(event)
         break
 
       case 'response.audio_transcript.delta':
         if (event.delta) {
           accumulatedTranscriptRef.current += event.delta
           // Check for JSON in delta to mute audio early (without cancelling the stream)
-          // Checking for just '{' is faster/safer than '{"' to prevent the start of JSON from being heard
           if (accumulatedTranscriptRef.current.includes('{')) {
             rtcClientRef.current?.muteAudio()
           }
@@ -242,8 +269,21 @@ export default function VoiceAssistant() {
         break
 
       case 'response.audio_transcript.done':
+        console.log('🎤 LLM transcript done:', event.transcript)
+        // Clear accumulated first to prevent response.audio.done from re-processing
+        accumulatedTranscriptRef.current = ''
         if (event.transcript) {
-          handleTranscript(event.transcript)
+          handleLLMResponse(event.transcript)
+        }
+        break
+
+      // Fallback: use response.audio.done with accumulated transcript (only if transcript.done didn't fire)
+      case 'response.audio.done':
+        if (accumulatedTranscriptRef.current) {
+          console.log('🎤 LLM response (from accumulated):', accumulatedTranscriptRef.current)
+          const transcript = accumulatedTranscriptRef.current
+          accumulatedTranscriptRef.current = '' // Clear immediately
+          handleLLMResponse(transcript)
         }
         break
 
@@ -259,13 +299,6 @@ export default function VoiceAssistant() {
       case 'response.done':
         console.log('📍 response.done - isSearching:', isSearchingRef.current, 'pendingSearch:', pendingSearchQueryRef.current)
         
-        // If we're awaiting a tool response, don't reset yet - the spoken response is coming
-        if (isAwaitingToolResponseRef.current) {
-          console.log('🔄 Function call response done, waiting for spoken response...')
-          isAwaitingToolResponseRef.current = false
-          return
-        }
-        
         // If we're in the middle of a search or have a pending search, don't reset
         if (isSearchingRef.current || pendingSearchQueryRef.current) {
           console.log('🔄 Search in progress or pending, keeping state...')
@@ -273,14 +306,7 @@ export default function VoiceAssistant() {
         }
         
         console.log('✅ Final response done, resetting state')
-        isProcessingRef.current = false
-        rtcClientRef.current?.setMicrophoneEnabled(false)
-        wakeWordServiceRef.current?.suppressWakeWord(false)
-        wakeWordServiceRef.current?.reset()
-        wakeWordServiceRef.current?.start().catch(err => console.error('Wake word restart error', err))
-        accumulatedTranscriptRef.current = ''
-        userTranscriptRef.current = ''
-        setCurrentTranscript('')
+        resetState()
         break
 
       case 'response.created':
@@ -296,6 +322,60 @@ export default function VoiceAssistant() {
         }
         break
     }
+  }
+
+  // Handle LLM response - check for search confirmation or process normally
+  const handleLLMResponse = (transcript: string) => {
+    if (isExecutingCommandRef.current || isSearchingRef.current) {
+      console.log('ℹ️ Skipping - already executing command or searching')
+      return
+    }
+
+    // Skip search detection if we already completed a search this turn
+    if (searchCompletedRef.current) {
+      console.log('ℹ️ Search already completed this turn, processing as normal response')
+      handleTranscript(transcript)
+      return
+    }
+
+    const llmResponse = transcript.toLowerCase().trim()
+    
+    // Check if LLM said "Searching" - at the start of the response
+    // Use regex to handle variations like "Searching.", "Searching...", etc.
+    const startsWithSearching = 
+      /^searching[.\s]*/i.test(llmResponse) || 
+      /^let me search/i.test(llmResponse) || 
+      /^looking that up/i.test(llmResponse) ||
+      /^let me look/i.test(llmResponse) ||
+      /^i('ll| will) search/i.test(llmResponse)
+    
+    console.log('🔍 Checking for search intent:', { llmResponse: llmResponse.substring(0, 50), startsWithSearching })
+    
+    if (startsWithSearching && !pendingSearchQueryRef.current) {
+      console.log('🔎 LLM confirmed search intent with:', transcript)
+      llmSaidSearchingRef.current = true
+      
+      // If we already have the user transcript, execute search now
+      if (userTranscriptRef.current) {
+        const searchQuery = extractSearchQuery(userTranscriptRef.current)
+        console.log('🔍 Will search for:', searchQuery)
+        pendingSearchQueryRef.current = searchQuery
+        // Execute search after a short delay to let audio finish
+        setTimeout(() => {
+          if (pendingSearchQueryRef.current && !isSearchingRef.current) {
+            console.log('🔍 Executing search...')
+            void executeWebSearch(pendingSearchQueryRef.current)
+          }
+        }, 500)
+      } else {
+        console.log('⏳ Waiting for user transcript to complete...')
+        // User transcript will trigger search when it completes
+      }
+      return
+    }
+    
+    // Normal transcript handling (IoT commands, etc.)
+    handleTranscript(transcript)
   }
 
   const handleTranscript = (transcript: string) => {
@@ -334,12 +414,11 @@ export default function VoiceAssistant() {
     return withoutJson || `Executed ${count} command${count > 1 ? 's' : ''}`
   }
 
-  // Detect if user is asking for a web search
-  const detectSearchIntent = (transcript: string): string | null => {
-    const lower = transcript.toLowerCase()
-    
-    // Explicit search patterns
-    const searchPatterns = [
+  // Extract search query from user's transcript
+  // Called after LLM confirms search intent by saying "Searching"
+  const extractSearchQuery = (transcript: string): string => {
+    // Try to extract the specific topic from common patterns
+    const extractPatterns = [
       /search (?:for |the web for |online for )?(.+)/i,
       /look up (.+)/i,
       /find (?:out |information (?:about |on )?)?(.+)/i,
@@ -347,23 +426,18 @@ export default function VoiceAssistant() {
       /tell me about (.+)/i,
       /who (?:is |are )(.+)/i,
       /what happened (?:with |to )?(.+)/i,
+      /(?:news|update|latest|recent|current) (?:about |on |for )?(.+)/i,
     ]
     
-    for (const pattern of searchPatterns) {
+    for (const pattern of extractPatterns) {
       const match = transcript.match(pattern)
       if (match && match[1]) {
         return match[1].trim()
       }
     }
     
-    // Keywords that suggest search intent
-    const searchKeywords = ['news', 'latest', 'current', 'today', 'yesterday', 'recent', 'update', 'happening']
-    if (searchKeywords.some(kw => lower.includes(kw))) {
-      // Use the whole transcript as the query
-      return transcript
-    }
-    
-    return null
+    // Fallback: use the whole transcript as the query
+    return transcript
   }
 
   // Execute web search and inject results
@@ -425,6 +499,9 @@ export default function VoiceAssistant() {
         }
       })
       
+      // Mark search as completed so we don't trigger again on the response
+      searchCompletedRef.current = true
+      
     } catch (error) {
       console.error('❌ Search error:', error)
       setCurrentTranscript('Search failed')
@@ -435,110 +512,18 @@ export default function VoiceAssistant() {
     }
   }
 
-  const handleFunctionCallItem = (event: any) => {
-    const item = event.item
-    // Only process function_call items
-    if (!item || item.type !== 'function_call') {
-      return
-    }
-
-    console.log('🧰 handleFunctionCallItem:', event)
-
-    const callId = item.call_id || item.id
-    if (!callId) return
-
-    console.log('🧰 Registering function call:', callId, item.name)
-    toolCallBufferRef.current[callId] = {
-      name: item.name,
-      arguments: '',
-      itemId: item.id,
-    }
-    isExecutingCommandRef.current = true
-  }
-
-  const handleFunctionCallArgumentsDelta = (event: any) => {
-    // console.log('🧰 handleFunctionCallArgumentsDelta:', event)
-    const callId = event.call_id
-    if (!callId) return
-
-    const deltaArgs = event.delta ?? ''
-    const existing = toolCallBufferRef.current[callId] ?? { arguments: '' }
-    existing.arguments += deltaArgs
-    toolCallBufferRef.current[callId] = {
-      ...existing,
-    }
-    isExecutingCommandRef.current = true
-  }
-
-  const handleFunctionCallCompleted = (event: any) => {
-    console.log('🧰 handleFunctionCallCompleted:', event)
-    const callId = event.call_id
-    if (!callId) return
-
-    const buffered = toolCallBufferRef.current[callId]
-    delete toolCallBufferRef.current[callId]
-
-    const argsString = event.arguments || buffered?.arguments || ''
-    const toolName = buffered?.name
-
-    console.log('🧰 Function call ready:', toolName, argsString)
-
-    // Set this BEFORE executing so response.done doesn't reset state
-    isAwaitingToolResponseRef.current = true
-
-    if (!toolName) {
-      console.warn('⚠️ Function call completed without known tool', event)
-      rtcClientRef.current?.sendFunctionCallOutput(callId, 'Unknown tool, unable to execute.')
-      isExecutingCommandRef.current = false
-      isAwaitingToolResponseRef.current = false
-      wakeWordServiceRef.current?.reset()
-      return
-    }
-
-    void executeTool(callId, toolName, argsString)
-  }
-
-  const executeTool = async (callId: string, toolName: string, argsString: string) => {
-    const tool = toolMap[toolName]
-    if (!tool) {
-      const message = `Unknown tool: ${toolName}`
-      console.warn('⚠️', message)
-      rtcClientRef.current?.sendFunctionCallOutput(callId, message)
-      isExecutingCommandRef.current = false
-      wakeWordServiceRef.current?.reset()
-      return
-    }
-
-    let outputMessage = ''
-    try {
-      const parsedArgs = argsString ? JSON.parse(argsString) : {}
-      console.log('⚙️ Executing tool:', toolName, parsedArgs)
-      const result = await tool.execute(parsedArgs)
-      outputMessage = typeof result === 'string' ? result : JSON.stringify(result)
-      console.log('✅ Tool execution complete:', toolName)
-    } catch (error) {
-      console.error('❌ Tool execution error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Unknown tool error'
-      outputMessage = `Tool ${toolName} error: ${errorMessage}`
-    } finally {
-      console.log('📤 Sending function call output:', outputMessage?.substring(0, 100) + '...')
-      // Resume audio before sending output so we can hear the response
-      rtcClientRef.current?.resumeAudio()
-      rtcClientRef.current?.sendFunctionCallOutput(callId, outputMessage || `Tool ${toolName} executed`)
-      isExecutingCommandRef.current = false
-      // isAwaitingToolResponseRef is already set in handleFunctionCallCompleted
-      // Don't reset wake word yet - wait for the spoken response
-    }
-  }
+  // Tool call handlers removed - search is now triggered by LLM saying "Searching"
 
   const handleWakeWordDetected = (keywordIndex: number) => {
-    // console.log('🎤 Wake word detected:', keywordIndex)
+    console.log('🎤 Wake word detected, index:', keywordIndex)
 
     if (!rtcClientRef.current) return
 
-    if (isProcessingRef.current) {
-      // console.log('⏭️ Skipping wake word - processing response')
-      return
+    // If currently processing/speaking, interrupt the LLM
+    if (isProcessingRef.current || isSearchingRef.current) {
+      console.log('🛑 Interrupting LLM response')
+      rtcClientRef.current.interruptAudio()
+      resetState()
     }
 
     if (keywordIndex === 1) {
@@ -557,9 +542,27 @@ export default function VoiceAssistant() {
       return
     }
 
+    // Reset search state for new conversation turn
+    searchCompletedRef.current = false
+    llmSaidSearchingRef.current = false
+    pendingSearchQueryRef.current = null
+    
     rtcClientRef.current.setMicrophoneEnabled(true)
     setAssistantState('listening')
     setCurrentTranscript('Listening...')
+    
+    // Clear any existing timeout
+    if (listeningTimeoutRef.current) {
+      clearTimeout(listeningTimeoutRef.current)
+    }
+    
+    // Safety timeout - if no speech detected in 10 seconds, reset to idle
+    // This timeout is cancelled when speech_started event fires
+    listeningTimeoutRef.current = setTimeout(() => {
+      console.log('⚠️ Listening timeout - no speech detected, resetting')
+      listeningTimeoutRef.current = null
+      resetState()
+    }, 10000)
   }
 
   const handleStateChange = (state: AssistantState) => {

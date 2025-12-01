@@ -162,9 +162,10 @@ export class WakeWordService {
             console.log('   - State:', this.state)
             console.log('   - Suppressed:', this.isSuppressed)
             
-            if (!this.isSuppressed && this.state === 'idle') {
+            // Accept wake word in idle state, or in any state if not suppressed (allows interruption)
+            if (!this.isSuppressed) {
               const wakeWordName = detection.label || this.config.keywordLabel || this.config.keywordBuiltin || 'custom wake word'
-              console.log(`🎯 Wake word ACCEPTED: "${wakeWordName}" (index: ${detection.index})`)
+              console.log(`🎯 Wake word ACCEPTED: "${wakeWordName}" (index: ${detection.index}, state: ${this.state})`)
               this.setState('listening')
               if (this.onWakeWordDetected) {
                 console.log('📞 Calling onWakeWordDetected with index:', detection.index)
@@ -173,7 +174,7 @@ export class WakeWordService {
                 console.warn('⚠️ onWakeWordDetected callback is null!')
               }
             } else {
-              console.log('🔇 Wake word REJECTED (state:', this.state, ', suppressed:', this.isSuppressed, ')')
+              console.log('🔇 Wake word REJECTED (suppressed:', this.isSuppressed, ')')
             }
           },
           porcupineModel,
