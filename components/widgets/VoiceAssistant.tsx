@@ -297,11 +297,18 @@ export default function VoiceAssistant() {
         break
 
       case 'response.done':
-        console.log('📍 response.done - isSearching:', isSearchingRef.current, 'pendingSearch:', pendingSearchQueryRef.current)
+        console.log('📍 response.done - isSearching:', isSearchingRef.current, 'pendingSearch:', pendingSearchQueryRef.current, 'llmSaidSearching:', llmSaidSearchingRef.current)
         
-        // If we're in the middle of a search or have a pending search, don't reset
-        if (isSearchingRef.current || pendingSearchQueryRef.current) {
-          console.log('🔄 Search in progress or pending, keeping state...')
+        // If we're in the middle of a search, have a pending search, or LLM said "Searching" (waiting for user transcript), don't reset
+        if (isSearchingRef.current || pendingSearchQueryRef.current || llmSaidSearchingRef.current) {
+          console.log('🔄 Search in progress, pending, or waiting for user transcript - keeping state...')
+          // Set a safety timeout in case user transcript never arrives
+          setTimeout(() => {
+            if (llmSaidSearchingRef.current && !isSearchingRef.current && !pendingSearchQueryRef.current) {
+              console.log('⚠️ Search timeout - user transcript never arrived, resetting')
+              resetState()
+            }
+          }, 5000)
           return
         }
         
