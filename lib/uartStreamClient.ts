@@ -16,8 +16,9 @@ export class UartStreamClient {
   private eventSource: EventSource | null = null
   private onPacket: UartStreamCallback | null = null
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 2
-  private reconnectDelay = 2000
+  private maxReconnectAttempts = 1
+  private reconnectDelay = 3000
+  private hasConnectedOnce = false
 
   /**
    * Connect to UART stream
@@ -31,6 +32,8 @@ export class UartStreamClient {
       this.eventSource = new EventSource('/api/iot/uart/stream')
 
       this.eventSource.onopen = () => {
+        this.hasConnectedOnce = true
+        this.reconnectAttempts = 0
         // console.log('✅ UART stream connected')
       }
 
@@ -74,14 +77,13 @@ export class UartStreamClient {
 
         if (this.reconnectAttempts < this.maxReconnectAttempts) {
           this.reconnectAttempts++
-          const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-      // console.log(`🔄 Reconnecting to UART stream in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+          console.log(`🔄 Reconnecting to UART stream in ${this.reconnectDelay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
 
           setTimeout(() => {
             if (this.onPacket) {
               this.connect(this.onPacket)
             }
-          }, delay)
+          }, this.reconnectDelay)
         } else {
           console.error('❌ Max reconnection attempts reached for UART stream')
         }

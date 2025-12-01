@@ -13,7 +13,7 @@ import { useSmartMirror } from '@/lib/smartMirrorContext'
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export default function VoiceAssistant() {
-  const { weather, stocks, news, devices, videoFeedEnabled, setVideoFeedEnabled, toggleVideoFeed, setIsListening } = useSmartMirror()
+  const { weather, stocks, news, devices, videoFeedEnabled, setVideoFeedEnabled, toggleVideoFeed, setIsListening, setIsInterrupted } = useSmartMirror()
   const [isConnected, setIsConnected] = useState(false)
   const [assistantState, setAssistantState] = useState<AssistantState>('idle')
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
@@ -35,6 +35,8 @@ export default function VoiceAssistant() {
   const listeningTimeoutRef = useRef<NodeJS.Timeout | null>(null) // Track listening timeout
   const userTranscriptRef = useRef('')
   const accumulatedTranscriptRef = useRef('')
+  const isSpeakingRef = useRef(false) // Track if Jarvis is currently speaking audio
+  const interruptAttemptRef = useRef(false) // Track if we just attempted to interrupt
 
   // Load keys on mount
   useEffect(() => {
@@ -113,6 +115,7 @@ export default function VoiceAssistant() {
         keywords: [
           { keywordPath: '/wake-words/jarvis.ppn', keywordLabel: 'Jarvis', sensitivity: 0.5 },
           { keywordPath: '/wake-words/jarvis-lights_en_wasm_v3_0_0.ppn', keywordLabel: 'Jarvis Lights', sensitivity: 0.5 },
+          { keywordPath: '/wake-words/Stop-Talking_en_wasm_v3_0_0.ppn', keywordLabel: 'Stop Talking', sensitivity: 0.5 },
         ],
       })
       wakeWordServiceRef.current = wakeWordService
@@ -180,6 +183,7 @@ export default function VoiceAssistant() {
     pendingSearchQueryRef.current = null
     accumulatedTranscriptRef.current = ''
     userTranscriptRef.current = ''
+    isSpeakingRef.current = false
     // Clear any pending listening timeout
     if (listeningTimeoutRef.current) {
       clearTimeout(listeningTimeoutRef.current)
@@ -203,7 +207,48 @@ export default function VoiceAssistant() {
         break
 
       case 'error':
+        // Check if this is a cancel error after an interrupt attempt
+        if (event.error?.code === 'response_cancel_not_active') {
+          if (interruptAttemptRef.current) {
+            console.log('ℹ️ No active response to cancel - starting new query')
+            interruptAttemptRef.current = false
+            
+            // Clear red flash since we're starting a new query
+            setIsInterrupted(false)
+            
+            // Start listening for new query
+            searchCompletedRef.current = false
+            llmSaidSearchingRef.current = false
+            pendingSearchQueryRef.current = null
+            
+            rtcClientRef.current?.setMicrophoneEnabled(true)
+            setAssistantState('listening')
+            setIsListening(true)
+            setCurrentTranscript('Listening...')
+            
+            if (listeningTimeoutRef.current) {
+              clearTimeout(listeningTimeoutRef.current)
+            }
+            
+            listeningTimeoutRef.current = setTimeout(() => {
+              console.log('⚠️ Listening timeout - no speech detected, resetting')
+              listeningTimeoutRef.current = null
+              resetState()
+            }, 10000)
+          }
+          break
+        }
         console.error('❌ API Error:', event.error)
+        break
+
+      case 'response.cancelled':
+        // Successfully cancelled a response - show red flash and reset
+        if (interruptAttemptRef.current) {
+          console.log('✅ Response cancelled - showing red flash')
+          setIsInterrupted(true)
+          setTimeout(() => setIsInterrupted(false), 1000)
+          interruptAttemptRef.current = false
+        }
         break
 
       case 'input_audio_buffer.speech_started':
@@ -256,8 +301,8 @@ export default function VoiceAssistant() {
 
       case 'response.output_item.added':
         isProcessingRef.current = true
-        // Don't suppress wake word - allow interruption
-        wakeWordServiceRef.current?.setState('processing')
+        // Don't suppress wake word during speaking - allow interruption
+        wakeWordServiceRef.current?.setState('speaking')
         break
 
       case 'response.audio_transcript.delta':
@@ -295,11 +340,15 @@ export default function VoiceAssistant() {
 
       case 'response.audio.delta':
         // Audio is streaming - ensure it's playing
+        isSpeakingRef.current = true
+        setAssistantState('speaking')
         rtcClientRef.current?.resumeAudio()
         break
 
       case 'response.done':
         console.log('📍 response.done - isSearching:', isSearchingRef.current, 'pendingSearch:', pendingSearchQueryRef.current, 'llmSaidSearching:', llmSaidSearchingRef.current)
+        
+        isSpeakingRef.current = false
         
         // If we're in the middle of a search, have a pending search, or LLM said "Searching" (waiting for user transcript), don't reset
         if (isSearchingRef.current || pendingSearchQueryRef.current || llmSaidSearchingRef.current) {
@@ -324,7 +373,9 @@ export default function VoiceAssistant() {
 
       default:
         // Log all events for debugging
-        if (event.type?.includes('function') || event.type?.includes('tool')) {
+        if (event.type?.includes('cancel')) {
+          console.log('🔍 Cancel-related event:', event.type, event)
+        } else if (event.type?.includes('function') || event.type?.includes('tool')) {
           console.log('🧰 Tool-related event:', event.type, event)
         } else if (event.type?.startsWith('response.')) {
           console.log('📨 Response event:', event.type)
@@ -552,17 +603,23 @@ export default function VoiceAssistant() {
   // Tool call handlers removed - search is now triggered by LLM saying "Searching"
 
   const handleWakeWordDetected = (keywordIndex: number) => {
-    console.log('🎤 Wake word detected, index:', keywordIndex)
+    console.log('🎤 Wake word detected, index:', keywordIndex, 'isSpeaking:', isSpeakingRef.current)
 
     if (!rtcClientRef.current) return
 
-    // If currently processing/speaking, interrupt the LLM
-    if (isProcessingRef.current || isSearchingRef.current) {
-      console.log('🛑 Interrupting LLM response')
-      rtcClientRef.current.interruptAudio()
-      resetState()
+    // Index 2 = Stop-Talking wake word - only stop audio if Jarvis is speaking
+    if (keywordIndex === 2) {
+      if (isSpeakingRef.current) {
+        console.log('🛑 Stop-Talking - interrupting audio')
+        rtcClientRef.current.interruptAudio()
+        setIsInterrupted(true)
+        setTimeout(() => setIsInterrupted(false), 600)
+        resetState()
+      }
+      return
     }
 
+    // Jarvis Lights wake word
     if (keywordIndex === 1) {
       setCurrentTranscript('Toggling lights...')
       IoTController.toggleLights()
@@ -579,28 +636,36 @@ export default function VoiceAssistant() {
       return
     }
 
-    // Reset search state for new conversation turn
-    searchCompletedRef.current = false
+    // Jarvis wake word (index 0)
+    // Always try to interrupt, let the API tell us if there was audio to cancel
+    console.log('🛑 Jarvis wake word - attempting to interrupt')
+    interruptAttemptRef.current = true
+    rtcClientRef.current.interruptAudio()
+    
+    // Show red flash immediately (will be kept if successful, cleared if error)
+    setIsInterrupted(true)
+    setTimeout(() => setIsInterrupted(false), 600)
+    
+    // Reset all state
+    isProcessingRef.current = false
+    isSearchingRef.current = false
+    isExecutingCommandRef.current = false
     llmSaidSearchingRef.current = false
+    searchCompletedRef.current = false
     pendingSearchQueryRef.current = null
-    
-    rtcClientRef.current.setMicrophoneEnabled(true)
-    setAssistantState('listening')
-    setIsListening(true)
-    setCurrentTranscript('Listening...')
-    
-    // Clear any existing timeout
+    accumulatedTranscriptRef.current = ''
+    userTranscriptRef.current = ''
+    isSpeakingRef.current = false
     if (listeningTimeoutRef.current) {
       clearTimeout(listeningTimeoutRef.current)
+      listeningTimeoutRef.current = null
     }
     
-    // Safety timeout - if no speech detected in 10 seconds, reset to idle
-    // This timeout is cancelled when speech_started event fires
-    listeningTimeoutRef.current = setTimeout(() => {
-      console.log('⚠️ Listening timeout - no speech detected, resetting')
-      listeningTimeoutRef.current = null
-      resetState()
-    }, 10000)
+    rtcClientRef.current.setMicrophoneEnabled(false)
+    wakeWordServiceRef.current?.reset()
+    wakeWordServiceRef.current?.start().catch(err => console.error('Wake word restart error', err))
+    setCurrentTranscript('')
+    setIsListening(false)
   }
 
   const handleStateChange = (state: AssistantState) => {

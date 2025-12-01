@@ -14,7 +14,7 @@ import { SmartMirrorProvider, useSmartMirror } from '@/lib/smartMirrorContext'
 
 function SmartMirrorContent() {
   const { isDimmed, setPresenceOn } = useUart()
-  const { videoFeedEnabled, isListening } = useSmartMirror()
+  const { videoFeedEnabled, isListening, isInterrupted } = useSmartMirror()
 
   return (
     <>
@@ -25,6 +25,15 @@ function SmartMirrorContent() {
         }`}
       >
         <div className="absolute inset-0 listening-glow" />
+      </div>
+
+      {/* Interrupted indicator - red flash */}
+      <div 
+        className={`fixed inset-0 z-40 pointer-events-none transition-opacity duration-500 ${
+          isInterrupted ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <div className="absolute inset-0 shadow-[inset_0_0_80px_rgba(239,68,68,0.6),inset_0_0_40px_rgba(239,68,68,0.4)]" />
       </div>
 
       {/* Fade overlay - smoothly transitions opacity */}

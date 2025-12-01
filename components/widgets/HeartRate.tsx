@@ -41,13 +41,13 @@ export default function HeartRate() {
       // Check packet type (new format uses packet_type field)
       const packetType = data.packet_type || ''
 
-      if (packetType === 'bpm_summary' || 'avg_bpm' in actualData) {
+      if (packetType === 'bpm_summary' || (typeof actualData === 'object' && actualData !== null && 'avg_bpm' in actualData)) {
         const hrData = actualData as BPMSummaryData
         console.log('BPM packet:', hrData)
         setHeartRate(hrData.avg_bpm)
         setFingerDetected(hrData.finger)
         setLastUpdate(new Date())
-      } else if (packetType === 'raw_ir' || 'ir_value' in actualData) {
+      } else if (packetType === 'raw_ir' || (typeof actualData === 'object' && actualData !== null && 'ir_value' in actualData)) {
         const irData = actualData as RawIRData
         console.log('IR packet:', irData.ir_value)
         setIrValues(prev => [...prev.slice(-199), irData.ir_value])
