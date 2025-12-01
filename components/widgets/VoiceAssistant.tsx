@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { WakeWordService, type AssistantState } from '@/lib/wakeWordService'
-import { parseMultipleIoTCommands } from '@/lib/iotTypes'
+import { parseMultipleIoTCommands, UICommand } from '@/lib/iotTypes'
 import { IoTController } from '@/lib/iotController'
 import { getEphemeralToken, JARVIS_INSTRUCTIONS, SESSION_CONFIG } from '@/lib/jarvisAgent'
 import { RealtimeWebRTCClient } from '@/lib/realtimeWebRTCClient'
@@ -13,7 +13,7 @@ import { useSmartMirror } from '@/lib/smartMirrorContext'
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
 export default function VoiceAssistant() {
-  const { weather, stocks, news, devices } = useSmartMirror()
+  const { weather, stocks, news, devices, videoFeedEnabled, setVideoFeedEnabled, toggleVideoFeed, setIsListening } = useSmartMirror()
   const [isConnected, setIsConnected] = useState(false)
   const [assistantState, setAssistantState] = useState<AssistantState>('idle')
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
@@ -83,7 +83,7 @@ export default function VoiceAssistant() {
   // Update session instructions when context changes
   useEffect(() => {
     if (rtcClientRef.current && isConnected) {
-      const contextInstructions = buildContextInstructions(weather, stocks, news, devices)
+      const contextInstructions = buildContextInstructions(weather, stocks, news, devices, videoFeedEnabled)
       const fullInstructions = JARVIS_INSTRUCTIONS + "\n\n" + contextInstructions
       
       // We need a way to update instructions on the fly
@@ -97,7 +97,7 @@ export default function VoiceAssistant() {
       })
       console.log('🧠 Updated Jarvis context with latest data')
     }
-  }, [weather, stocks, news, devices, isConnected, timeTrigger])
+  }, [weather, stocks, news, devices, isConnected, timeTrigger, videoFeedEnabled])
 
   const handleConnect = async () => {
     if (!apiKey || !picovoiceKey) return
@@ -119,7 +119,7 @@ export default function VoiceAssistant() {
       await wakeWordService.initialize(handleWakeWordDetected, handleStateChange)
 
       // Build initial instructions with current context
-      const contextInstructions = buildContextInstructions(weather, stocks, news, devices)
+      const contextInstructions = buildContextInstructions(weather, stocks, news, devices, videoFeedEnabled)
       const fullInstructions = JARVIS_INSTRUCTIONS + "\n\n" + contextInstructions
 
       const client = new RealtimeWebRTCClient({
@@ -189,6 +189,7 @@ export default function VoiceAssistant() {
     wakeWordServiceRef.current?.reset()
     wakeWordServiceRef.current?.start().catch(err => console.error('Wake word restart error', err))
     setCurrentTranscript('')
+    setIsListening(false)
   }
 
   const handleRealtimeEvent = (event: any) => {
@@ -207,6 +208,7 @@ export default function VoiceAssistant() {
 
       case 'input_audio_buffer.speech_started':
         setAssistantState('listening')
+        setIsListening(true)
         rtcClientRef.current?.resumeAudio() // Ensure audio plays for new turn
         userTranscriptRef.current = ''
         // Cancel listening timeout - speech detected!
@@ -398,17 +400,45 @@ export default function VoiceAssistant() {
       setLastResponse(friendlyMessage)
       setCurrentTranscript('')
 
-      Promise.all(iotCommands.map(cmd => IoTController.executeCommand(cmd)))
-        .then(() => {
-          console.log('✅ IoT commands executed successfully')
-          isExecutingCommandRef.current = false
-          wakeWordServiceRef.current?.reset()
-        })
-        .catch(err => {
-          console.error('❌ Error executing commands:', err)
-          isExecutingCommandRef.current = false
-          wakeWordServiceRef.current?.reset()
-        })
+      // Separate UI commands from IoT commands
+      const uiCommands = iotCommands.filter((cmd): cmd is UICommand => 
+        'type' in cmd && cmd.type === 'ui'
+      )
+      const deviceCommands = iotCommands.filter(cmd => 
+        !('type' in cmd && cmd.type === 'ui')
+      )
+
+      // Handle UI commands (video feed toggle, etc.)
+      for (const uiCmd of uiCommands) {
+        if (uiCmd.target === 'video_feed') {
+          console.log('📺 Video feed command:', uiCmd.action)
+          if (uiCmd.action === 'toggle') {
+            toggleVideoFeed()
+          } else if (uiCmd.action === 'on') {
+            setVideoFeedEnabled(true)
+          } else if (uiCmd.action === 'off') {
+            setVideoFeedEnabled(false)
+          }
+        }
+      }
+
+      // Handle device commands
+      if (deviceCommands.length > 0) {
+        Promise.all(deviceCommands.map(cmd => IoTController.executeCommand(cmd)))
+          .then(() => {
+            console.log('✅ IoT commands executed successfully')
+            isExecutingCommandRef.current = false
+            wakeWordServiceRef.current?.reset()
+          })
+          .catch(err => {
+            console.error('❌ Error executing commands:', err)
+            isExecutingCommandRef.current = false
+            wakeWordServiceRef.current?.reset()
+          })
+      } else {
+        isExecutingCommandRef.current = false
+        wakeWordServiceRef.current?.reset()
+      }
     } else {
       console.log('ℹ️ No IoT command detected in transcript')
       setLastResponse(transcript)
@@ -556,6 +586,7 @@ export default function VoiceAssistant() {
     
     rtcClientRef.current.setMicrophoneEnabled(true)
     setAssistantState('listening')
+    setIsListening(true)
     setCurrentTranscript('Listening...')
     
     // Clear any existing timeout
@@ -574,9 +605,10 @@ export default function VoiceAssistant() {
 
   const handleStateChange = (state: AssistantState) => {
     setAssistantState(state)
+    setIsListening(state === 'listening')
   }
 
-  const buildContextInstructions = (weather: any, stocks: any[], news: any[], devices: any[]) => {
+  const buildContextInstructions = (weather: any, stocks: any[], news: any[], devices: any[], videoEnabled: boolean) => {
     const now = new Date()
     const dateTime = now.toLocaleString('en-US', { 
       weekday: 'long', 
@@ -589,6 +621,8 @@ export default function VoiceAssistant() {
     })
 
     let context = `CURRENT CONTEXT (as of ${dateTime}):\n`
+    
+    context += `\nVideo Feed: ${videoEnabled ? 'ON' : 'OFF'}`
     
     if (weather) {
       context += `\nWeather in ${weather.city}: ${weather.temp}°F, ${weather.description}, Humidity: ${weather.humidity}%, Wind: ${weather.wind_speed}mph.`

@@ -36,6 +36,11 @@ type SmartMirrorContextType = {
   setNews: (data: NewsArticle[]) => void
   devices: Device[]
   setDevices: (data: Device[]) => void
+  videoFeedEnabled: boolean
+  setVideoFeedEnabled: (enabled: boolean) => void
+  toggleVideoFeed: () => void
+  isListening: boolean
+  setIsListening: (listening: boolean) => void
 }
 
 const SmartMirrorContext = createContext<SmartMirrorContextType>({
@@ -47,6 +52,11 @@ const SmartMirrorContext = createContext<SmartMirrorContextType>({
   setNews: () => {},
   devices: [],
   setDevices: () => {},
+  videoFeedEnabled: false,
+  setVideoFeedEnabled: () => {},
+  toggleVideoFeed: () => {},
+  isListening: false,
+  setIsListening: () => {},
 })
 
 export function SmartMirrorProvider({ children }: { children: ReactNode }) {
@@ -54,6 +64,10 @@ export function SmartMirrorProvider({ children }: { children: ReactNode }) {
   const [stocks, setStocks] = useState<StockData[]>([])
   const [news, setNews] = useState<NewsArticle[]>([])
   const [devices, setDevices] = useState<Device[]>([])
+  const [videoFeedEnabled, setVideoFeedEnabled] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+
+  const toggleVideoFeed = () => setVideoFeedEnabled(prev => !prev)
 
   return (
     <SmartMirrorContext.Provider
@@ -66,6 +80,11 @@ export function SmartMirrorProvider({ children }: { children: ReactNode }) {
         setNews,
         devices,
         setDevices,
+        videoFeedEnabled,
+        setVideoFeedEnabled,
+        toggleVideoFeed,
+        isListening,
+        setIsListening,
       }}
     >
       {children}

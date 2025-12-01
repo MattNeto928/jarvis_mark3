@@ -8,14 +8,25 @@ import News from './widgets/News'
 import VoiceAssistant from './widgets/VoiceAssistant'
 import IoTDevices from './widgets/IoTDevices'
 import HeartRate from './widgets/HeartRate'
+import VideoFeed from './widgets/VideoFeed'
 import { UartProvider, useUart } from '@/lib/uartContext'
-import { SmartMirrorProvider } from '@/lib/smartMirrorContext'
+import { SmartMirrorProvider, useSmartMirror } from '@/lib/smartMirrorContext'
 
 function SmartMirrorContent() {
   const { isDimmed, setPresenceOn } = useUart()
+  const { videoFeedEnabled, isListening } = useSmartMirror()
 
   return (
     <>
+      {/* Listening indicator - neon blue glow border */}
+      <div 
+        className={`fixed inset-0 z-40 pointer-events-none transition-opacity duration-1000 ${
+          isListening ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <div className="absolute inset-0 listening-glow" />
+      </div>
+
       {/* Fade overlay - smoothly transitions opacity */}
       <div 
         className={`fixed inset-0 bg-black z-50 pointer-events-none transition-opacity duration-[3000ms] ${
@@ -53,11 +64,17 @@ function SmartMirrorContent() {
             <Clock />
           </div>
 
-          {/* Mirror Space */}
-          <div className="flex-1"></div>
+          {/* Video Feed - only shown when enabled via voice command */}
+          {videoFeedEnabled ? (
+            <div className="flex-1 my-4 flex items-center justify-center">
+              <VideoFeed className="w-[640px] h-[480px]" />
+            </div>
+          ) : (
+            <div className="flex-1" />
+          )}
 
-          {/* Bottom Widgets */}
-          <div className="flex-shrink-0 space-y-3">
+          {/* Bottom Widgets - snapped to bottom */}
+          <div className="flex-shrink-0 space-y-3 mt-auto">
             {/* Stocks */}
             <Stocks />
             

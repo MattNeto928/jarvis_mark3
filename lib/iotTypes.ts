@@ -34,8 +34,15 @@ export type GenericDeviceCommand = {
   value: any
 }
 
-// Union type: either a Tuya light command OR a direct UART packet
-export type IoTCommand = LightCommand | UartPacket | GenericDeviceCommand
+// UI Command for controlling mirror interface elements (video feed, etc.)
+export type UICommand = {
+  type: 'ui'
+  target: 'video_feed'
+  action: 'toggle' | 'on' | 'off'
+}
+
+// Union type: either a Tuya light command OR a direct UART packet OR a UI command
+export type IoTCommand = LightCommand | UartPacket | GenericDeviceCommand | UICommand
 
 export type Device = {
   id: string
@@ -175,6 +182,11 @@ export function parseMultipleIoTCommands(text: string): IoTCommand[] {
           const compactJson = JSON.parse(JSON.stringify(parsed))
           console.log('📋 Parsed UART packet (multi):', JSON.stringify(compactJson, null, 2))
           commands.push(compactJson as UartPacket)
+        }
+        // Check if it's a UI command (video feed toggle, etc.)
+        else if (parsed.type === 'ui' && parsed.target && parsed.action) {
+          console.log('📋 Parsed UI command (multi):', JSON.stringify(parsed, null, 2))
+          commands.push(parsed as IoTCommand)
         }
         // Check if it's a Tuya command
         else if (parsed.type && parsed.deviceId && parsed.action && parsed.transport) {
